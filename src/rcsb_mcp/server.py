@@ -163,6 +163,7 @@ async def search_fulltext(
     limit: int = 10,
     include_computed_models: bool = False,
     enrich: bool = True,
+    group_by_identity: int | None = None,
 ) -> dict[str, Any]:
     """Search the PDB by free-text keywords (e.g. "CRISPR Cas9", "hemoglobin").
 
@@ -172,10 +173,18 @@ async def search_fulltext(
         limit: Max number of hits to return (1-100).
         include_computed_models: Also search computed structure models (AlphaFold etc.).
         enrich: If true, attach title/method/resolution for each entry hit.
+        group_by_identity: If set (100/95/90/70/50/30), collapse redundant hits into
+            sequence-identity clusters and return one representative each; forces
+            return_type to "polymer_entity".
     """
     limit = max(1, min(limit, 100))
+    return_type = "polymer_entity" if group_by_identity else return_type
     body = queries.build_fulltext_query(
-        query, return_type=return_type, rows=limit, include_computed=include_computed_models
+        query,
+        return_type=return_type,
+        rows=limit,
+        include_computed=include_computed_models,
+        group_by_identity=group_by_identity,
     )
     raw = await _post_search(body)
     ids = [r["identifier"] for r in raw.get("result_set", [])]
@@ -187,10 +196,13 @@ async def search_fulltext(
 async def search_by_attribute(
     attribute: str,
     operator: str,
-    value: Any,
+    value: Any = None,
     return_type: str = "entry",
     limit: int = 10,
     enrich: bool = True,
+    negation: bool = False,
+    case_sensitive: bool = False,
+    group_by_identity: int | None = None,
 ) -> dict[str, Any]:
     """Search by a specific structural attribute.
 
@@ -203,19 +215,35 @@ async def search_by_attribute(
         - Released after a date:
           attribute="rcsb_accession_info.initial_release_date",
           operator="greater", value="2024-01-01T00:00:00Z"
+        - Has any ligand annotated (no value needed):
+          attribute="rcsb_nonpolymer_entity.pdbx_description", operator="exists"
 
     Args:
         attribute: A dotted RCSB attribute path (see the Search API attribute list).
         operator: One of exact_match, in, contains_words, contains_phrase,
-            greater, greater_or_equal, less, less_or_equal, equals, range.
-        value: The comparison value (string, number, list, or {from,to} for range).
+            greater, greater_or_equal, less, less_or_equal, equals, range, exists.
+        value: The comparison value (string, number, list, or a range object
+            {from, to, include_lower, include_upper} — bounds are EXCLUSIVE unless
+            include_lower/include_upper are true). Omit for the "exists" operator.
         return_type: Result identifier type (default "entry").
         limit: Max hits (1-100).
         enrich: Attach entry metadata when return_type is "entry".
+        negation: Invert the match (e.g. "not Homo sapiens").
+        case_sensitive: Match the value case-sensitively (default insensitive).
+        group_by_identity: If set (100/95/90/70/50/30), return one representative per
+            sequence-identity cluster; forces return_type to "polymer_entity".
     """
     limit = max(1, min(limit, 100))
+    return_type = "polymer_entity" if group_by_identity else return_type
     body = queries.build_attribute_query(
-        attribute, operator, value, return_type=return_type, rows=limit
+        attribute,
+        operator,
+        value,
+        return_type=return_type,
+        rows=limit,
+        negation=negation,
+        case_sensitive=case_sensitive,
+        group_by_identity=group_by_identity,
     )
     raw = await _post_search(body)
     ids = [r["identifier"] for r in raw.get("result_set", [])]
@@ -233,6 +261,7 @@ async def search_combined(
     enrich: bool = True,
     sort_by: str | None = None,
     sort_direction: str = "asc",
+    group_by_identity: int | None = None,
 ) -> dict[str, Any]:
     """Search with several constraints at once (free text + attribute filters).
 
@@ -250,7 +279,8 @@ async def search_combined(
     Args:
         full_text: Optional free-text term, combined with the filters.
         filters: List of {attribute, operator, value} dicts (see search_by_attribute
-            for operators and attribute paths).
+            for operators and attribute paths). Each may also carry optional
+            "negation" and "case_sensitive" booleans.
         logical_operator: Combine all conditions with "and" (default) or "or".
         return_type: Result identifier type (default "entry").
         limit: Max hits (1-100).
@@ -258,8 +288,11 @@ async def search_combined(
         sort_by: Attribute to sort by, e.g. "rcsb_entry_info.resolution_combined".
             Omit to sort by relevance score.
         sort_direction: "asc" or "desc" (default "asc").
+        group_by_identity: If set (100/95/90/70/50/30), return one representative per
+            sequence-identity cluster; forces return_type to "polymer_entity".
     """
     limit = max(1, min(limit, 100))
+    return_type = "polymer_entity" if group_by_identity else return_type
     body = queries.build_combined_query(
         full_text=full_text,
         filters=filters,
@@ -268,6 +301,7 @@ async def search_combined(
         rows=limit,
         sort_by=sort_by,
         sort_direction=sort_direction,
+        group_by_identity=group_by_identity,
     )
     raw = await _post_search(body)
     ids = [r["identifier"] for r in raw.get("result_set", [])]
@@ -301,6 +335,130 @@ async def search_by_sequence(
         rows=limit,
     )
     raw = await _post_search(body)
+    return _format(raw, None)
+
+
+@mcp.tool()
+async def search_by_chemical(
+    value: str,
+    query_type: str = "descriptor",
+    descriptor_type: str = "SMILES",
+    match_type: str = "graph-relaxed",
+    match_subset: bool = False,
+    return_type: str = "mol_definition",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Search PDB chemical components by structure (SMILES/InChI) or formula.
+
+    Args:
+        value: A SMILES/InChI string (query_type="descriptor") or a molecular
+            formula like "C8H9NO2" (query_type="formula").
+        query_type: "descriptor" (default) or "formula".
+        descriptor_type: "SMILES" or "InChI" (descriptor queries only).
+        match_type: Graph/fingerprint criterion for descriptor queries. Use
+            "graph-relaxed" for whole-molecule matches or "sub-struct-graph-relaxed"
+            for substructure search; "fingerprint-similarity" for similar molecules.
+        match_subset: Formula queries only — match formulas that merely contain the
+            requested atoms.
+        return_type: Result identifier type (default "mol_definition" = chem comp).
+        limit: Max hits (1-100).
+    """
+    limit = max(1, min(limit, 100))
+    body = queries.build_chemical_query(
+        value,
+        query_type=query_type,
+        descriptor_type=descriptor_type,
+        match_type=match_type,
+        match_subset=match_subset,
+        return_type=return_type,
+        rows=limit,
+    )
+    raw = await _post_search(body)
+    return _format(raw, None)
+
+
+@mcp.tool()
+async def search_by_structure(
+    entry_id: str,
+    assembly_id: str | None = None,
+    asym_id: str | None = None,
+    return_type: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Find structures with a similar 3D shape to a reference PDB structure.
+
+    Args:
+        entry_id: Reference PDB entry, e.g. "4HHB".
+        assembly_id: Use this biological assembly as the reference (e.g. "1").
+            Defaults to assembly "1" when neither assembly_id nor asym_id is given.
+        asym_id: Use this single chain as the reference instead (mutually exclusive
+            with assembly_id).
+        return_type: Result identifier type; defaults to "assembly" for an assembly
+            reference or "polymer_instance" for a chain reference.
+        limit: Max hits (1-100).
+    """
+    limit = max(1, min(limit, 100))
+    body = queries.build_structure_query(
+        entry_id,
+        assembly_id=assembly_id,
+        asym_id=asym_id,
+        return_type=return_type,
+        rows=limit,
+    )
+    raw = await _post_search(body)
+    return _format(raw, None)
+
+
+@mcp.tool()
+async def search_by_seqmotif(
+    pattern: str,
+    pattern_type: str = "prosite",
+    sequence_type: str = "protein",
+    return_type: str = "polymer_entity",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Find polymers containing a short sequence motif (PROSITE / regex / simple).
+
+    Args:
+        pattern: The motif, e.g. "C-x(2,4)-C-x(3)-[LIVMFYWC]-x(8)-H-x(3,5)-H"
+            (prosite), "C..H[LIVF]" (regex), or "NXS" (simple wildcards).
+        pattern_type: "prosite" (default), "regex", or "simple".
+        sequence_type: "protein" (default), "dna", or "rna".
+        return_type: Result identifier type (default "polymer_entity").
+        limit: Max hits (1-100).
+    """
+    limit = max(1, min(limit, 100))
+    body = queries.build_seqmotif_query(
+        pattern,
+        pattern_type=pattern_type,
+        sequence_type=sequence_type,
+        return_type=return_type,
+        rows=limit,
+    )
+    raw = await _post_search(body)
+    return _format(raw, None)
+
+
+@mcp.tool()
+async def search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
+    """Run a raw RCSB Search API query body (escape hatch).
+
+    Endpoint: https://search.rcsb.org/rcsbsearch/v2/query . The typed search_*
+    tools cover the common cases; use this for features they don't expose —
+    facets, return_all_hits, return_counts, group_by "groups", strucmotif, or
+    deeply nested boolean queries. The body must follow the Search API query
+    language ({"query": ..., "return_type": ..., "request_options": ...}).
+    Returns the normalized {total_count, returned, hits} result.
+
+    Example:
+        query_body={
+          "query": {"type": "terminal", "service": "full_text",
+                    "parameters": {"value": "ribosome"}},
+          "return_type": "entry",
+          "request_options": {"paginate": {"start": 0, "rows": 5}},
+        }
+    """
+    raw = await _post_search(query_body)
     return _format(raw, None)
 
 

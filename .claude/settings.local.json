@@ -31,7 +31,14 @@
       "Bash(curl -s -X POST https://data.rcsb.org/graphql -H 'Content-Type: application/json' -d '{\"query\":\"{ entry\\(entry_id:\\\\\"4HHB\\\\\"\\){ rcsb_entry_container_identifiers{ pubmed_id } } }\"}')",
       "Bash(curl -s -X POST https://data.rcsb.org/graphql -H 'Content-Type: application/json' -d '{\"query\":\"query\\($id:Int!\\){ pubmed\\(pubmed_id:$id\\){ rcsb_id rcsb_pubmed_central_id rcsb_pubmed_doi } }\",\"variables\":{\"id\":6726807}}')",
       "Bash(PYTHONPATH=src python -)",
-      "Bash(rm -f /tmp/introspect_types.py /tmp/introspect_nested.py /tmp/validate_defaults.py)"
+      "Bash(rm -f /tmp/introspect_types.py /tmp/introspect_nested.py /tmp/validate_defaults.py)",
+      "Read(//private/tmp/**)",
+      "Bash(curl -s https://search.rcsb.org/openapi.json -o rcsb_openapi.json)",
+      "Bash(curl -s \"https://search.rcsb.org/schema/search/request/json-schema-rcsb_search_query.json\" -o rcsb_query_schema.json)",
+      "Bash(python3 -c \"import json;print\\(json.dumps\\(json.load\\(open\\('s_return_type.json'\\)\\),indent=1\\)\\)\")",
+      "Bash(python3 -c \"import json;print\\(json.dumps\\(json.load\\(open\\('s_node_group.json'\\)\\),indent=1\\)\\)\")",
+      "Bash(python3 -c \"import json;print\\(json.dumps\\(json.load\\(open\\('s_node_terminal.json'\\)\\),indent=1\\)\\)\")",
+      "Bash(python3 -c \"import json;print\\(json.dumps\\(json.load\\(open\\('s_request_options.json'\\)\\),indent=1\\)\\)\")"
     ]
   }
 }

@@ -12,9 +12,17 @@ MCP Inspector, Cursor, etc.).
 | Tool | What it does |
 |------|--------------|
 | `search_fulltext` | Free-text keyword search (e.g. `"CRISPR Cas9"`). |
-| `search_by_attribute` | Structured search on an indexed attribute (resolution, organism, release date, ...). |
+| `search_by_attribute` | Structured search on an indexed attribute (resolution, organism, release date, ...). Supports `exists`, `negation`, and `case_sensitive`. |
 | `search_combined` | Combine free text + multiple attribute filters (AND/OR) in one query, with optional sort. |
 | `search_by_sequence` | MMseqs2 sequence-similarity search (BLAST-like). |
+| `search_by_chemical` | Chemical search by SMILES/InChI descriptor (whole-molecule or substructure) or molecular formula. |
+| `search_by_structure` | 3D shape-similarity search against a reference PDB assembly or chain. |
+| `search_by_seqmotif` | Short sequence-motif search (PROSITE pattern, regex, or simple wildcards). |
+| `search_advanced` | Escape hatch: run a raw Search API query body (facets, `return_all_hits`, `return_counts`, grouped results, strucmotif, ...). |
+
+The three text tools (`search_fulltext`, `search_by_attribute`, `search_combined`)
+also take `group_by_identity` (100/95/90/70/50/30) to return one representative
+per sequence-identity cluster — i.e. non-redundant results.
 
 ### Data (data.rcsb.org/graphql)
 
@@ -99,6 +107,10 @@ Restart Claude Desktop. The tools appear under the connectors (plug) icon.
 - "Find high-resolution human hemoglobin structures." → `search_by_attribute` + `search_fulltext`
 - "Human hemoglobin structures better than 2 Å, best resolution first." → `search_combined`
 - "What PDB entries match this protein sequence: MTEY..." → `search_by_sequence`
+- "Find structures containing a ligand like this SMILES / with formula C8H9NO2." → `search_by_chemical`
+- "Which structures have a 3D fold similar to 4HHB?" → `search_by_structure`
+- "Find proteins with a zinc-finger PROSITE motif." → `search_by_seqmotif`
+- "Non-redundant human kinase structures (90% identity clusters)." → `search_fulltext` / `search_combined` with `group_by_identity=90`
 - "Summarize PDB entries 4HHB, 1MBN and 6VXX." → `get_entries`
 - "What's the sequence and organism of entity 4HHB_1?" → `get_polymer_entities`
 - "Tell me about the ligand HEM." → `get_chem_comps`
