@@ -632,14 +632,33 @@ async def seqcoord_alignments(
     seq_range: list[int] | None = None,
     fields: str | None = None,
 ) -> dict[str, Any]:
-    """Map a sequence's coordinates from one reference system to another.
+    """Cross-reference a sequence across PDB, UniProt, and NCBI, with aligned ranges.
 
-    Reference systems (from_ref/to_ref): NCBI_GENOME, NCBI_PROTEIN, PDB_ENTITY,
-    PDB_INSTANCE, UNIPROT.
+    This is the tool for "which X identifiers correspond to this sequence?" across
+    databases — including NCBI. The RCSB Data API only cross-references UniProt, so
+    use THIS tool for NCBI RefSeq protein / genome mappings (and PDB<->UniProt too).
+    The returned target_alignments[].target_id values are the mapped identifiers in
+    the to_ref system, each with its aligned regions.
+
+    Reference systems (from_ref/to_ref):
+        UNIPROT       — a UniProt accession, e.g. "P69905"
+        NCBI_PROTEIN  — an NCBI RefSeq protein, e.g. "NP_000508"
+        NCBI_GENOME   — an NCBI RefSeq genome, e.g. "NC_000016"
+        PDB_ENTITY    — a PDB polymer entity, e.g. "4HHB_1" (entry_entityNumber)
+        PDB_INSTANCE  — a PDB polymer chain, e.g. "4HHB.A" (entry.asym_id)
+
+    Note: PDB query ids must be ENTITY-level ("4HHB_1"), not a bare entry ("4HHB").
+    To answer a question about a whole entry, first get its polymer entity ids
+    (e.g. via the Data API: 4HHB -> 4HHB_1, 4HHB_2) and query each one.
+
+    Examples:
+        - "What NCBI proteins map to PDB entity 4HHB_1?"
+          query_id="4HHB_1", from_ref="PDB_ENTITY", to_ref="NCBI_PROTEIN"
+        - "Which PDB entities correspond to UniProt P69905?"
+          query_id="P69905", from_ref="UNIPROT", to_ref="PDB_ENTITY"
 
     Args:
-        query_id: The sequence id in the from_ref system, e.g. "P69905" (UNIPROT)
-            or "4HHB_1" (PDB_ENTITY).
+        query_id: The sequence id in the from_ref system (see above).
         from_ref: Reference system of query_id.
         to_ref: Reference system to map onto.
         seq_range: Optional [begin, end] (1-based) to restrict the query region.
@@ -647,7 +666,20 @@ async def seqcoord_alignments(
     """
     body = queries.build_sc_alignments_query(query_id, from_ref, to_ref, seq_range, fields)
     data = await _graphql_field(body, "alignments", url=SEQCOORD_GRAPHQL_URL)
-    return data if data is not None else {"query_id": query_id, "error": "no alignment found"}
+    if not data or not (data.get("target_alignments")):
+        return {
+            "query_id": query_id,
+            "from_ref": from_ref,
+            "to_ref": to_ref,
+            "target_alignments": [],
+            "note": (
+                "No alignments found. For PDB, query_id must be an entity ("
+                f'e.g. "4HHB_1"), not a bare entry. Got {query_id!r}.'
+                if from_ref.startswith("PDB") and "_" not in query_id and "." not in query_id
+                else "No alignments found for this query."
+            ),
+        }
+    return data
 
 
 @mcp.tool()

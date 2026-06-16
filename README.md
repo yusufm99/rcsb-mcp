@@ -65,9 +65,15 @@ Maps alignments and positional annotations between sequence reference systems
 (`UNIPROT`, `NCBI_PROTEIN`, `NCBI_GENOME`, `PDB_ENTITY`, `PDB_INSTANCE`). Each
 tool takes an optional `fields` argument to override the default selection.
 
+This is the **only** RCSB API that cross-references **NCBI** (RefSeq protein /
+genome) — the Data API only knows UniProt. So "what NCBI proteins map to a PDB
+structure?" is answered by `seqcoord_alignments`, not the Data API. PDB query
+ids must be **entity-level** (`4HHB_1`), not a bare entry (`4HHB`); for a whole
+entry, query each polymer entity.
+
 | Tool | What it does |
 |------|--------------|
-| `seqcoord_alignments` | Map a sequence's coordinates from one reference system to another (e.g. UniProt `P69905` → PDB entities). |
+| `seqcoord_alignments` | Cross-reference a sequence across PDB / UniProt / NCBI with aligned ranges (e.g. `4HHB_1` → NCBI proteins `NP_000508`, `NP_000549`). |
 | `seqcoord_annotations` | Positional features for one sequence, from one or more annotation `sources` (`UNIPROT`, `PDB_ENTITY`, `PDB_INSTANCE`, `PDB_INTERFACE`). |
 | `seqcoord_group_alignments` | Alignments among members of a sequence group (`MATCHING_UNIPROT_ACCESSION` / `SEQUENCE_IDENTITY`). |
 | `seqcoord_group_annotations` | Annotations across a group; `summary=True` returns a positional summary. |
@@ -132,6 +138,7 @@ Restart Claude Desktop. The tools appear under the connectors (plug) icon.
 - "What's the composition of the 4HHB biological assembly?" → `get_assemblies`
 - "Which PDB entries does P69905 map to?" → `get_uniprot`
 - "Which PDB entities align to UniProt P69905, and over what ranges?" → `seqcoord_alignments`
+- "What NCBI proteins map to 4HHB?" → `seqcoord_alignments` per entity (`4HHB_1`, `4HHB_2`), `to_ref=NCBI_PROTEIN`
 - "Show UniProt features mapped onto PDB entity 4HHB_1." → `seqcoord_annotations`
 - "Pull a field GraphQL doesn't expose by default / combine objects." → `data_graphql`
 

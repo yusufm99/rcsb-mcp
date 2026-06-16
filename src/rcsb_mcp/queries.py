@@ -594,7 +594,8 @@ def build_data_query(
 # Sequence Coordinates API GraphQL bodies (https://sequence-coordinates.rcsb.org/graphql)
 # --------------------------------------------------------------------------- #
 # This API maps alignments and positional annotations between sequence reference
-# systems (UniProt, NCBI, PDB entity/instance). Each builder returns a
+# systems (UniProt, NCBI RefSeq protein/genome, PDB entity/instance) — it is the
+# only RCSB API that cross-references NCBI. Each builder returns a
 # {"query", "variables"} dict; enum arguments are validated against the schema
 # and ids ride in GraphQL variables. Pass `fields` to override the selection.
 
@@ -651,7 +652,13 @@ def build_sc_alignments_query(
 ) -> dict[str, Any]:
     """Alignments mapping `query_id` from one reference system to another.
 
-    Example: query_id="P69905", from_ref="UNIPROT", to_ref="PDB_ENTITY".
+    Cross-references identifiers across UNIPROT, NCBI_PROTEIN, NCBI_GENOME,
+    PDB_ENTITY, and PDB_INSTANCE. PDB ids must be entity/instance level
+    ("4HHB_1" / "4HHB.A"), not a bare entry.
+
+    Examples:
+        query_id="4HHB_1", from_ref="PDB_ENTITY", to_ref="NCBI_PROTEIN"
+        query_id="P69905", from_ref="UNIPROT", to_ref="PDB_ENTITY"
     """
     _require_enum(from_ref, SEQUENCE_REFERENCES, "from_ref")
     _require_enum(to_ref, SEQUENCE_REFERENCES, "to_ref")
