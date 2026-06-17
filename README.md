@@ -32,25 +32,25 @@ There is one tool per Data API GraphQL root field. Each takes a **list of IDs**
 override the curated default selection with your own GraphQL sub-selection.
 Unknown IDs are reported under `not_found`.
 
-| Tool | Object | Example ID |
-|------|--------|------------|
-| `get_entries` | PDB entries | `"4HHB"` |
-| `get_polymer_entities` | Polymer entities (protein/NA) | `"4HHB_1"` |
-| `get_nonpolymer_entities` | Ligand/cofactor entities | `"4HHB_3"` |
-| `get_branched_entities` | Carbohydrate entities | `"5FMB_2"` |
-| `get_polymer_entity_instances` | Polymer chains | `"4HHB.A"` |
-| `get_nonpolymer_entity_instances` | Bound-ligand instances | `"4HHB.E"` |
-| `get_branched_entity_instances` | Glycan chains | `"5FMB.C"` |
-| `get_assemblies` | Biological assemblies | `"4HHB-1"` |
-| `get_interfaces` | Assembly interfaces | `"1BMV-1.1"` |
-| `get_chem_comps` | Chemical components / ligands | `"HEM"`, `"ATP"` |
-| `get_entry_groups` | Entry groups | group ID |
-| `get_polymer_entity_groups` | Polymer entity groups (seq. clusters) | `"85_70"` |
-| `get_nonpolymer_entity_groups` | Non-polymer entity groups | group ID |
-| `get_uniprot` | UniProt record (single) | `"P69905"` |
-| `get_pubmed` | PubMed record (single, integer) | `6726807` |
+| Tool | Object | Example ID                       |
+|------|--------|----------------------------------|
+| `get_entries` | PDB entries | `"4HHB"`                         |
+| `get_polymer_entities` | Polymer entities (protein/NA) | `"4HHB_1"`                       |
+| `get_nonpolymer_entities` | Ligand/cofactor entities | `"4HHB_3"`                       |
+| `get_branched_entities` | Carbohydrate entities | `"5FMB_2"`                       |
+| `get_polymer_entity_instances` | Polymer chains | `"4HHB.A"`                       |
+| `get_nonpolymer_entity_instances` | Bound-ligand instances | `"4HHB.E"`                       |
+| `get_branched_entity_instances` | Glycan chains | `"5FMB.C"`                       |
+| `get_assemblies` | Biological assemblies | `"4HHB-1"`                       |
+| `get_interfaces` | Assembly interfaces | `"1BMV-1.1"`                     |
+| `get_chem_comps` | Chemical components / ligands | `"HEM"`, `"ATP"`                 |
+| `get_entry_groups` | Entry groups | `"G_1002266"`                    |
+| `get_polymer_entity_groups` | Polymer entity groups (seq. clusters) | `"85_70"`                        |
+| `get_nonpolymer_entity_groups` | Non-polymer entity groups | `"ATP"`                          |
+| `get_uniprot` | UniProt record (single) | `"P69905"`                       |
+| `get_pubmed` | PubMed record (single, integer) | `6726807`                        |
 | `get_group_provenance` | Grouping provenance (single) | `"provenance_sequence_identity"` |
-| `data_graphql` | Escape hatch: run any GraphQL query against the Data API. | — |
+| `data_graphql` | Escape hatch: run any GraphQL query against the Data API. | —                                |
 
 The Search API only returns identifiers, so the search tools optionally
 **enrich** entry hits with metadata. Enrichment and all Data API tools query
