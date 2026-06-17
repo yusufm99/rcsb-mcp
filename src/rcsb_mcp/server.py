@@ -25,7 +25,7 @@ from . import queries
 SEARCH_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
 DATA_GRAPHQL_URL = "https://data.rcsb.org/graphql"
 SEQCOORD_GRAPHQL_URL = "https://sequence-coordinates.rcsb.org/graphql"
-USER_AGENT = "rcsb-mcp/0.1 (https://github.com/your/repo)"
+USER_AGENT = "rcsb-mcp/0.1 (https://github.com/rcsb/rcsb-mcp)"
 TIMEOUT = httpx.Timeout(30.0)
 
 mcp = FastMCP("rcsb-pdb")
@@ -225,7 +225,7 @@ async def search_by_attribute(
           attribute="rcsb_nonpolymer_entity.pdbx_description", operator="exists"
 
     Args:
-        attribute: A dotted RCSB attribute path (see the Search API attribute list).
+        attribute: A dotted RCSB attribute path (see the Search API attribute list: https://search.rcsb.org/structure-search-attributes.html).
         operator: One of exact_match, in, contains_words, contains_phrase,
             greater, greater_or_equal, less, less_or_equal, equals, range, exists.
         value: The comparison value (string, number, list, or a range object
