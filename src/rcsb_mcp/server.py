@@ -21,7 +21,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from rcsb_mcp.search_attibutes import SEARCH_ATTRIBUTES
-from . import queries
+from rcsb_mcp import queries
 
 SEARCH_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
 DATA_GRAPHQL_URL = "https://data.rcsb.org/graphql"
