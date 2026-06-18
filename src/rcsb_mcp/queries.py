@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
+from rcsb_mcp.graphql_queries import ENTRY_ANNOTATIONS, ENTRY_EXP_INFO
+
 # Valid return types accepted by the Search API.
 RETURN_TYPES = {
     "entry",
@@ -532,6 +534,14 @@ DATA_OBJECTS: dict[str, DataObject] = {
         "rcsb_group_provenance_container_identifiers{group_provenance_id}",
         upper=False,
     ),
+    "entry_annotations": DataObject(
+        "entries", "entry_ids", True, "String", 'entry IDs, e.g. "4HHB"',
+        ENTRY_ANNOTATIONS
+    ),
+    "entry_exp_info": DataObject(
+        "entries", "entry_ids", True, "String", 'entry IDs, e.g. "4HHB"',
+        ENTRY_EXP_INFO
+    )
 }
 
 

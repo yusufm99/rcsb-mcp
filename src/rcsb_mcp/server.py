@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+from rcsb_mcp.search_attibutes import SEARCH_ATTRIBUTES
 from . import queries
 
 SEARCH_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
@@ -28,7 +29,12 @@ SEQCOORD_GRAPHQL_URL = "https://sequence-coordinates.rcsb.org/graphql"
 USER_AGENT = "rcsb-mcp/0.1 (https://github.com/rcsb/rcsb-mcp)"
 TIMEOUT = httpx.Timeout(30.0)
 
-mcp = FastMCP("rcsb-pdb")
+mcp = FastMCP(
+    name="rcsb-pdb",
+    instructions="""You are a PDB search assistant. You have access to tools that allow you to retrieve the search schema attributes
+and execute search queries against the RCSB PDB APIs. Use these tools to help users find relevant information
+in the PDB database. Always make sure to understand the search schema before constructing queries."""
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -197,6 +203,21 @@ async def search_fulltext(
     enriched = await _enrich(ids) if (enrich and return_type == "entry" and ids) else None
     return _format(raw, enriched)
 
+@mcp.tool()
+async def list_pdb_search_attributes() -> list[dict[str, Any]]:
+    """
+    List searchable RCSB PDB Search API attributes available for query construction.
+
+    Each returned attribute includes:
+    - attribute: RCSB/PDB attribute path, e.g. pdbx_entity_nonpoly.name
+    - type: attribute value type, e.g. string, number, integer, or date
+    - operators: supported query operators
+    - description: human-readable attribute description
+
+    Returns:
+        Matching searchable PDB attributes and summary metadata.
+    """
+    return SEARCH_ATTRIBUTES
 
 @mcp.tool()
 async def search_by_attribute(
@@ -225,7 +246,7 @@ async def search_by_attribute(
           attribute="rcsb_nonpolymer_entity.pdbx_description", operator="exists"
 
     Args:
-        attribute: A dotted RCSB attribute path (see the Search API attribute list: https://search.rcsb.org/structure-search-attributes.html).
+        attribute: A dotted RCSB attribute path (see the Search API attribute list: https://search.rcsb.org/structure-search-attributes.html). The `list_pdb_search_attributes` tool can be used to retrieve the list of all available attributes.
         operator: One of exact_match, in, contains_words, contains_phrase,
             greater, greater_or_equal, less, less_or_equal, equals, range, exists.
         value: The comparison value (string, number, list, or a range object
@@ -482,6 +503,24 @@ async def get_entries(entry_ids: list[str], fields: str | None = None) -> dict[s
     listed under "not_found". For a single entry pass a one-element list.
     """
     return await _query_batch("entries", entry_ids, fields)
+
+@mcp.tool()
+async def get_entry_annotations(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+    """Fetch biological and functional annotations for one or more PDB entries, including Gene Ontology terms (molecular function, biological process, and cellular component), protein domain classifications, disease associations, antibody annotations, gene product information, and other biological annotations.
+
+    IDs are 4-character entry codes, e.g. ["4HHB", "1MBN"]. Unknown IDs are
+    listed under "not_found". For a single entry pass a one-element list.
+    """
+    return await _query_batch("entry_annotations", entry_ids, fields)
+
+@mcp.tool()
+async def get_entry_exp_info(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+    """Fetch detailed experimental conditions and structure-determination metadata for one or more PDB entries, including sample temperature, pH, pressure, experimental method, diffraction data, and other reported experimental parameters.
+
+    IDs are 4-character entry codes, e.g. ["4HHB", "1MBN"]. Unknown IDs are
+    listed under "not_found". For a single entry pass a one-element list.
+    """
+    return await _query_batch("entry_exp_info", entry_ids, fields)
 
 
 @mcp.tool()

@@ -12,17 +12,19 @@ Your task is to answer user queries by searching the Protein Data Bank using the
 
 ## Output Format
 
-The search results should be presented as a table inside a fully rendered HTML page. 
+The search results should be presented as a table inside a fully rendered HTML page, including the next content:
 
-The table should include the following columns:
-
-* **PDB ID** (hyperlinked to the RCSB structure summary page)
-* **Organism**
-* **Release Date**
-* **Title**
-* **Experimental Method**
-* **Resolution (Å)** (display "NA" if unavailable)
-* **Additional Information** (query-specific details)
+* The page should include a title describing the search.
+* The page should indicate all the RCSB PDB APIs used for finding and building the results.
+* The page should include all the search attributes and conditions used for searching.
+* The page should include a table to display the search results with the following columns:
+  * **PDB ID** (hyperlinked to the RCSB structure summary page)
+  * **Organism**
+  * **Release Date**
+  * **Title**
+  * **Experimental Method**
+  * **Resolution (Å)** (display "NA" if unavailable)
+  * **Additional Information** (query-specific details)
 
 For the PDB ID column, use links of the form:
 
@@ -36,6 +38,7 @@ Adapt the content of the **Additional Information** column to the user's questio
 
 * Protein or complex name
 * Ligands or cofactors
+* Protein domains
 * Gene name
 * UniProt accession
 * Mutation information
@@ -44,6 +47,7 @@ Adapt the content of the **Additional Information** column to the user's questio
 * Biological assembly information
 * Interface or binding-site details
 * Functional annotations
+* Related disease annotations
 * Any other information that would help answer the query
 
 ## Response Guidelines
