@@ -1,14 +1,17 @@
-"""An MCP server for the RCSB PDB Search and Data APIs.
+"""An MCP server for interrogating Protein Data Bank structures.
 
-Exposes tools that let an LLM search the Protein Data Bank
-(https://search.rcsb.org) by keyword, structural attribute, or sequence
-similarity, and fetch metadata from the RCSB Data API
-(https://data.rcsb.org/graphql) for entries, polymer entities, and ligands.
-The Search API returns only identifiers, so the search tools optionally
-enrich results with titles/resolution/method pulled from the Data API.
-Additionally, the Sequence Coordinates API (https://sequence-coordinates.rcsb.org/graphql)
-is used to map alignments and positional annotations between sequence reference systems
-(`UNIPROT`, `NCBI_PROTEIN`, `NCBI_GENOME`, `PDB_ENTITY`, `PDB_INSTANCE`).
+Spans three RCSB APIs so an LLM can take a question from discovery through detail:
+- DISCOVER: search the Protein Data Bank (https://search.rcsb.org) by keyword,
+  structural attribute, sequence, chemistry, 3D shape, or motif.
+- INSPECT: fetch entry / entity / assembly / ligand metadata and annotations from
+  the Data API (https://data.rcsb.org/graphql).
+- RELATE: map alignments and positional annotations between sequence reference
+  systems (UniProt, NCBI, PDB entity/instance) via the Sequence Coordinates API
+  (https://sequence-coordinates.rcsb.org/graphql).
+
+The Search API returns only identifiers, so search tools optionally enrich entry
+hits with metadata from the Data API, and an entry's component ids let the agent
+drill top-down into its entities, assemblies, and ligands.
 
 Run locally (stdio, for Claude Desktop / MCP Inspector):
     python -m rcsb_mcp.server
@@ -35,7 +38,24 @@ ATTRIBUTE_CATALOGS = {"structure": SEARCH_ATTRIBUTES, "chemical": CHEMICAL_SEARC
 
 mcp = FastMCP(
     name="rcsb-pdb",
-    instructions="""You are a PDB search assistant for the RCSB Search, Data, and Sequence Coordinates APIs.
+    instructions="""You are an assistant for interrogating Protein Data Bank structures via the
+RCSB Search, Data, and Sequence Coordinates APIs. You can:
+- DISCOVER structures — find identifiers with the search_* tools (keyword, attribute,
+  sequence, chemical, 3D shape, structural/sequence motif), count them (search_count),
+  or aggregate them into buckets (search_facets).
+- INSPECT structures — fetch detailed properties, experimental info, and annotations with
+  the get_* tools; use describe_data_object to discover further fields to request.
+- RELATE sequences — map alignments and positional features across PDB, UniProt, and NCBI
+  with the seqcoord_* tools.
+
+Interrogation is usually multi-step; chain tools rather than relying on a single call:
+- Find then detail: a search returns ids of ONE return_type — batch them into the matching
+  get_* tool for details (see "Return types and fetching details" below).
+- Top-down: get_entries returns an entry's component ids (rcsb_entry_container_identifiers:
+  polymer/non-polymer/branched entity ids and assembly ids) — compose them with the entry id
+  and feed them to get_polymer_entities / get_nonpolymer_entities / get_assemblies, etc.
+- Cross-reference: map an entry/entity to UniProt or NCBI with seqcoord_alignments, and pull
+  positional features with seqcoord_annotations.
 
 Choosing a search tool:
 - When the request resolves to a clear attribute and value (e.g. resolution < 2 Å,
@@ -917,9 +937,16 @@ async def get_entries(entry_ids: list[str], fields: str | None = None) -> dict[s
     dates, primary citation, and publication abstract).
 
     IDs are 4-character entry codes, e.g. ["4HHB", "1MBN"]. Unknown IDs are
-    listed under "not_found". For a single entry pass a one-element list. For fields
-    beyond this summary, use describe_data_object("entries") to find the path and
-    pass it via `fields`.
+    listed under "not_found". For a single entry pass a one-element list.
+
+    The response also lists the entry's component ids under
+    rcsb_entry_container_identifiers — use these to drill into the structure. They are
+    bare numbers; compose them with the entry id to call the matching get_* tool:
+    polymer_entity_ids/non_polymer_entity_ids "N" -> "<ENTRY>_N" (get_polymer_entities /
+    get_nonpolymer_entities); assembly_ids "N" -> "<ENTRY>-N" (get_assemblies).
+
+    For fields beyond this summary, use describe_data_object("entries") to find the
+    path and pass it via `fields`.
     """
     return await _query_batch("entries", entry_ids, fields)
 

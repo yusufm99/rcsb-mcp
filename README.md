@@ -1,10 +1,15 @@
 # rcsb-mcp
 
-An [MCP](https://modelcontextprotocol.io) server that exposes the
-[RCSB PDB Search API](https://search.rcsb.org),
-[Data API](https://data.rcsb.org/graphql), and
-[Sequence Coordinates API](https://sequence-coordinates.rcsb.org/graphql) to LLM
-clients (Claude Desktop, MCP Inspector, Cursor, etc.).
+An [MCP](https://modelcontextprotocol.io) server for **interrogating Protein Data
+Bank structures** — discover, inspect, and cross-reference — from LLM clients
+(Claude Desktop, MCP Inspector, Cursor, etc.). It spans three RCSB APIs:
+
+- **Discover** — find structures with the [Search API](https://search.rcsb.org)
+  (keyword, attribute, sequence, chemistry, 3D shape, motif).
+- **Inspect** — fetch entry / entity / assembly / ligand details and annotations
+  from the [Data API](https://data.rcsb.org/graphql).
+- **Relate** — map sequences and positional features across PDB, UniProt, and NCBI
+  with the [Sequence Coordinates API](https://sequence-coordinates.rcsb.org/graphql).
 
 ## Tools
 

@@ -653,6 +653,8 @@ DATA_OBJECTS: dict[str, DataObject] = {
         "rcsb_entry_info{resolution_combined experimental_method molecular_weight "
         "deposited_polymer_entity_instance_count deposited_nonpolymer_entity_instance_count} "
         "rcsb_accession_info{deposit_date initial_release_date} "
+        "rcsb_entry_container_identifiers{polymer_entity_ids non_polymer_entity_ids "
+        "branched_entity_ids assembly_ids} "
         "rcsb_primary_citation{title rcsb_journal_abbrev year pdbx_database_id_DOI} "
         "pubmed{rcsb_pubmed_abstract_text}",
     ),
