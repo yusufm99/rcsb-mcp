@@ -486,7 +486,11 @@ async def search_fulltext(
     covered by that ontology — THEN fall back to a keyword search here for the concept.
 
     Args:
-        query: Free-text search terms. Quote multi-word phrases for exact match.
+        query: Free-text terms matched (case-insensitively) against all text annotations.
+            Quote a multi-word phrase to require the words adjacent/in order (e.g.
+            '"DNA polymerase"'); separate words narrow the results (most must match).
+            Trailing '*' is a prefix wildcard. AND/OR/NOT are NOT boolean operators here —
+            for boolean logic across conditions use search_combined.
         return_type: What to return (default "entry"); one of entry, polymer_entity,
             non_polymer_entity, polymer_instance, assembly, mol_definition (see the
             "Return types and fetching details" note in the server instructions).
@@ -540,7 +544,8 @@ async def list_pdb_search_attributes(
               search_by_attribute / search_combined (usually return_type="mol_definition").
 
     Returns:
-        Matching searchable attributes (all of them when query is omitted).
+        A list of {attribute, type, operators, description} dicts — one per matching
+        attribute (fields described above); all of them when query is omitted.
     """
     try:
         catalog = ATTRIBUTE_CATALOGS[schema]
@@ -851,6 +856,9 @@ async def search_by_attribute(
     annotation attribute: disease -> find_disease_terms (rcsb_uniprot_annotation...);
     function/process/location -> find_go_terms; domain/family/fold -> find_interpro_domains;
     enzyme/reaction -> find_enzyme_classes.
+    If a resolver returns no usable id, or a concept/annotation filter yields no hits, fall
+    back to search_fulltext for the concept. (For ordinary constraints — resolution, organism,
+    dates — an empty result is a valid answer: report it, don't keyword-search instead.)
 
     Examples:
         - High-resolution structures:
