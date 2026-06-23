@@ -131,6 +131,11 @@ Other capabilities:
   rcsb_uniprot_annotation.annotation_lineage.id exact_match "MONDO:..." (UniProt-based disease
   annotation; lineage matches the disease and its subtypes; "in" with several to broaden).
   Prefer higher pdb_entry_count.
+- FALLBACK: if a find_* resolver returns no usable match (count 0, or all results have
+  pdb_entry_count 0), the concept isn't covered by that ontology — fall back to a keyword search
+  (search_fulltext, or search_combined with a full_text term) for it. The resolver's response
+  carries a "note" saying so. Also use full text for concepts no ontology covers (tissues, broad
+  phenotypes, free-text descriptors).
 
 Return types and fetching details:
 - Every search returns identifiers of ONE return_type. The six valid types — with an example
@@ -438,6 +443,17 @@ async def _annotation_pdb_count(attribute: str, value: str) -> int | None:
         return None
 
 
+def _resolver_fallback_note(items: list[dict[str, Any]], label: str) -> str | None:
+    """Advise a keyword fallback when an ontology resolver finds nothing usable."""
+    if not items:
+        return (f"No {label} matched this concept. Fall back to a keyword search "
+                "(search_fulltext, or search_combined with a full_text term) for it.")
+    if all("pdb_entry_count" in it for it in items) and not any(it["pdb_entry_count"] for it in items):
+        return (f"Matched {label}(s) but none are annotated in the PDB (pdb_entry_count 0). "
+                "A keyword search (search_fulltext) may still surface relevant structures.")
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Tools
 # --------------------------------------------------------------------------- #
@@ -458,6 +474,16 @@ async def search_fulltext(
     `search_combined`) instead — call `list_pdb_search_attributes` first to find the
     exact attribute path and operators. Attribute search is more precise and avoids
     spurious keyword matches.
+
+    BEFORE keyword-searching a biological CONCEPT, try to resolve it to an ontology id first
+    and filter on the annotation (far more precise):
+      - disease / condition (e.g. "diabetes", "cancer")   -> find_disease_terms
+      - molecular function / process / location            -> find_go_terms
+      - protein domain / family / fold                     -> find_interpro_domains
+      - enzyme / catalyzed reaction                        -> find_enzyme_classes
+    Each returns ids to use with search_by_attribute on the matching annotation attribute.
+    If a resolver finds no usable match (count 0, or all pdb_entry_count 0), the concept isn't
+    covered by that ontology — THEN fall back to a keyword search here for the concept.
 
     Args:
         query: Free-text search terms. Quote multi-word phrases for exact match.
@@ -600,7 +626,11 @@ async def find_go_terms(
         ))
         for term, count in zip(terms, counts):
             term["pdb_entry_count"] = count
-    return {"query": query, "namespace": aspect, "count": len(terms), "terms": terms}
+    result = {"query": query, "namespace": aspect, "count": len(terms), "terms": terms}
+    note = _resolver_fallback_note(terms, "GO term")
+    if note:
+        result["note"] = note
+    return result
 
 
 @mcp.tool()
@@ -663,7 +693,11 @@ async def find_interpro_domains(
         ))
         for entry, count in zip(entries, counts):
             entry["pdb_entry_count"] = count
-    return {"query": query, "entry_type": etype, "count": len(entries), "entries": entries}
+    result = {"query": query, "entry_type": etype, "count": len(entries), "entries": entries}
+    note = _resolver_fallback_note(entries, "InterPro entry")
+    if note:
+        result["note"] = note
+    return result
 
 
 @mcp.tool()
@@ -721,7 +755,11 @@ async def find_enzyme_classes(
         ))
         for enzyme, count in zip(enzymes, counts):
             enzyme["pdb_entry_count"] = count
-    return {"query": query, "count": len(enzymes), "enzymes": enzymes}
+    result = {"query": query, "count": len(enzymes), "enzymes": enzymes}
+    note = _resolver_fallback_note(enzymes, "EC number")
+    if note:
+        result["note"] = note
+    return result
 
 
 @mcp.tool()
@@ -785,7 +823,11 @@ async def find_disease_terms(
         ))
         for disease, count in zip(diseases, counts):
             disease["pdb_entry_count"] = count
-    return {"query": query, "count": len(diseases), "diseases": diseases}
+    result = {"query": query, "count": len(diseases), "diseases": diseases}
+    note = _resolver_fallback_note(diseases, "MONDO disease term")
+    if note:
+        result["note"] = note
+    return result
 
 
 @mcp.tool()
@@ -804,6 +846,11 @@ async def search_by_attribute(
     """Search by a specific structural attribute — preferred over search_fulltext
     whenever the request resolves to a clear attribute and value. If you don't know
     the exact attribute path or its operators, call `list_pdb_search_attributes` first.
+
+    For a biological concept, resolve it to an ontology id first and filter on the matching
+    annotation attribute: disease -> find_disease_terms (rcsb_uniprot_annotation...);
+    function/process/location -> find_go_terms; domain/family/fold -> find_interpro_domains;
+    enzyme/reaction -> find_enzyme_classes.
 
     Examples:
         - High-resolution structures:
@@ -875,6 +922,11 @@ async def search_combined(
     chemical: bool = False,
 ) -> dict[str, Any]:
     """Search with several constraints at once (free text + attribute filters).
+
+    For a biological concept among the constraints, resolve it to an ontology id first and add
+    it as an annotation filter: disease -> find_disease_terms; function/process/location ->
+    find_go_terms; domain/family/fold -> find_interpro_domains; enzyme/reaction ->
+    find_enzyme_classes.
 
     Use this when a request combines multiple conditions, e.g.
     "human hemoglobin structures better than 2 Angstrom resolution":
