@@ -130,6 +130,10 @@ rcsb-mcp
 npx @modelcontextprotocol/inspector python -m rcsb_mcp.server
 ```
 
+There is also an end-to-end **evaluation suite** ([`evals/`](evals/)) — 10
+read-only, stable questions that measure how well an LLM can drive these tools to
+answer real PDB questions. See [`evals/README.md`](evals/README.md) to run it.
+
 ## Connect to Claude Desktop
 
 Edit `claude_desktop_config.json`:

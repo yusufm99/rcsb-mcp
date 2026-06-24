@@ -1,0 +1,49 @@
+<evaluation>
+   <!--
+     Evaluation suite for the rcsb-pdb MCP server (see evals/README.md).
+     Every answer was verified against the live RCSB APIs on 2026-06-24.
+     Questions are anchored to deposited-structure metadata (resolution, dates,
+     sequences, ligands, citations, cross-references), which is immutable once
+     released, so the answers are stable over time. No dynamic counts are used.
+   -->
+   <qa_pair>
+      <question>PDB entry 4HHB is a human haemoglobin structure containing two distinct polymer entities. Identify the one corresponding to the BETA subunit, and report the UniProt accession that this entity maps to.</question>
+      <answer>P68871</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>The oxygen-transport protein deposited as PDB entry 4HHB binds an iron-containing porphyrin cofactor that is present in four copies in the structure. Identify that cofactor's chemical component and report its InChIKey exactly as given by the Data API.</question>
+      <answer>KABFMIBPWCXCRK-RGGAHWMASA-L</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Consider the first biological assembly of PDB entry 4HHB. How many polymer chains (polymer entity instances) does that assembly contain?</question>
+      <answer>4</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>PDB entry 1MBN is the classic myoglobin structure. What is the binomial (genus and species) scientific name of its source organism, as reported by the Data API?</question>
+      <answer>Physeter macrocephalus</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>PDB entry 1IEP is the Abl tyrosine-kinase catalytic domain in complex with the anti-cancer drug imatinib (Gleevec). Excluding any chloride ion, what is the three-letter PDB chemical component identifier of the bound inhibitor?</question>
+      <answer>STI</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Compare the four PDB chemical components with identifiers HEM, ATP, NAD, and STI. Which one has the greatest molecular (formula) weight? Give its three-letter component identifier.</question>
+      <answer>NAD</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>PDB entry 6VXX is a cryo-EM structure of the SARS-CoV-2 spike glycoprotein in its closed prefusion state, released in 2020. What is the DOI of its primary citation?</question>
+      <answer>10.1016/j.cell.2020.02.058</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Using the Sequence Coordinates API, map the protein (polymer) entity of PDB entry 1IEP to UniProt. What single UniProt accession does it correspond to?</question>
+      <answer>P00520</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Using the domain/family resolver, resolve the protein module known as the "SH2 domain" to its InterPro accession (the exact-match canonical domain entry). What is the InterPro ID?</question>
+      <answer>IPR000980</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Using the disease-term resolver, resolve the genetic disease "cystic fibrosis" to its MONDO ontology identifier (the exact-match canonical term). What is the MONDO ID?</question>
+      <answer>MONDO:0009061</answer>
+   </qa_pair>
+</evaluation>
