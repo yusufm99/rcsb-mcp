@@ -93,7 +93,7 @@ Offset = Annotated[int, Field(ge=0)]
 ResolverLimit = Annotated[int, Field(ge=1, le=25)]
 Tolerance = Annotated[int, Field(ge=0, le=3)]
 
-# Attribute catalogs by schema name (see list_pdb_search_attributes).
+# Attribute catalogs by schema name (see rcsb_list_pdb_search_attributes).
 ATTRIBUTE_CATALOGS = {"structure": SEARCH_ATTRIBUTES, "chemical": CHEMICAL_SEARCH_ATTRIBUTES}
 
 # Gene Ontology resolver (EBI QuickGO) + friendly aspect/namespace aliases.
@@ -121,87 +121,87 @@ INTENZ_SEARCH_URL = "https://www.ebi.ac.uk/ebisearch/ws/rest/intenz"
 OLS_SEARCH_URL = "https://www.ebi.ac.uk/ols4/api/search"
 
 mcp = FastMCP(
-    name="rcsb-pdb",
+    name="rcsb_mcp",
     instructions="""You are an assistant for interrogating Protein Data Bank structures via the
 RCSB Search, Data, and Sequence Coordinates APIs. You can:
-- DISCOVER structures — find identifiers with the search_* tools (keyword, attribute,
-  sequence, chemical, 3D shape, structural/sequence motif), count them (search_count),
-  or aggregate them into buckets (search_facets).
+- DISCOVER structures — find identifiers with the rcsb_search_* tools (keyword, attribute,
+  sequence, chemical, 3D shape, structural/sequence motif), count them (rcsb_search_count),
+  or aggregate them into buckets (rcsb_search_facets).
 - INSPECT structures — fetch detailed properties, experimental info, and annotations with
-  the get_* tools; use describe_data_object to discover further fields to request.
+  the rcsb_get_* tools; use rcsb_describe_data_object to discover further fields to request.
 - RELATE sequences — map alignments and positional features across PDB, UniProt, and NCBI
-  with the seqcoord_* tools.
+  with the rcsb_seqcoord_* tools.
 
 Interrogation is usually multi-step; chain tools rather than relying on a single call:
 - Find then detail: a search returns ids of ONE return_type — batch them into the matching
-  get_* tool for details (see "Return types and fetching details" below).
-- Top-down: get_entries returns an entry's component ids (rcsb_entry_container_identifiers:
+  rcsb_get_* tool for details (see "Return types and fetching details" below).
+- Top-down: rcsb_get_entries returns an entry's component ids (rcsb_entry_container_identifiers:
   polymer/non-polymer/branched entity ids and assembly ids) — compose them with the entry id
-  and feed them to get_polymer_entities / get_nonpolymer_entities / get_assemblies, etc.
-- Cross-reference: map an entry/entity to UniProt or NCBI with seqcoord_alignments, and pull
-  positional features with seqcoord_annotations.
+  and feed them to rcsb_get_polymer_entities / rcsb_get_nonpolymer_entities / rcsb_get_assemblies, etc.
+- Cross-reference: map an entry/entity to UniProt or NCBI with rcsb_seqcoord_alignments, and pull
+  positional features with rcsb_seqcoord_annotations.
 
 Choosing a search tool:
 - When the request resolves to a clear attribute and value (e.g. resolution < 2 Å,
   organism = Homo sapiens, method = X-RAY DIFFRACTION, released after a date), prefer a
   STRUCTURED search: if you don't already know the exact attribute path, call
-  list_pdb_search_attributes to find it, then use search_by_attribute (or
-  search_combined when several conditions apply). This is more precise than keyword search.
-- Use search_fulltext only for broad or exploratory keyword lookups where no specific
+  rcsb_list_pdb_search_attributes to find it, then use rcsb_search_by_attribute (or
+  rcsb_search_combined when several conditions apply). This is more precise than keyword search.
+- Use rcsb_search_fulltext only for broad or exploratory keyword lookups where no specific
   attribute and value apply, or when the right search terms aren't yet known.
 
 Other capabilities:
-- For "how many ..." questions, use search_count (count only) rather than fetching and
+- For "how many ..." questions, use rcsb_search_count (count only) rather than fetching and
   counting hits.
 - For "break down / distribution / per X" questions (e.g. structures per experimental
-  method, per release year, per organism), use search_facets to aggregate matches into
+  method, per release year, per organism), use rcsb_search_facets to aggregate matches into
   buckets instead of paging through results.
-- search_strucmotif finds structures sharing a 3D arrangement of specific residues (a
-  geometric motif); this is different from search_by_structure (whole-shape similarity).
+- rcsb_search_strucmotif finds structures sharing a 3D arrangement of specific residues (a
+  geometric motif); this is different from rcsb_search_by_structure (whole-shape similarity).
 - To search chemical-component attributes (chem_comp.*, drugbank_info.*, rcsb_chem_comp_*),
-  call list_pdb_search_attributes(schema="chemical") to find the path, then pass chemical=True
-  to search_by_attribute / search_combined (usually with return_type="mol_definition").
+  call rcsb_list_pdb_search_attributes(schema="chemical") to find the path, then pass chemical=True
+  to rcsb_search_by_attribute / rcsb_search_combined (usually with return_type="mol_definition").
 - For requests about a molecular FUNCTION ("kinase activity"), biological PROCESS ("DNA repair"),
-  or cellular COMPONENT / location ("mitochondrial membrane"), first call find_go_terms to resolve
+  or cellular COMPONENT / location ("mitochondrial membrane"), first call rcsb_find_go_terms to resolve
   the phrase to a Gene Ontology id, then search with
   rcsb_polymer_entity_annotation.annotation_lineage.id exact_match "GO:..." (matches the term and
   all its descendants). This is far more precise than keyword search. Prefer terms with a higher
   pdb_entry_count; use the "in" operator with several GO ids to broaden.
 - For requests referencing a protein DOMAIN, FAMILY, or fold ("SH2 domain", "immunoglobulin fold",
-  "kinase domain"), first call find_interpro_domains to resolve it to an InterPro id, then search
+  "kinase domain"), first call rcsb_find_interpro_domains to resolve it to an InterPro id, then search
   with rcsb_polymer_entity_annotation.annotation_id exact_match "IPR..." (add .type="InterPro" to be
   explicit; "in" with several IPR ids to broaden). Note: for InterPro use annotation_id (NOT
   annotation_lineage.id — its hierarchy is not expanded). Prefer higher pdb_entry_count.
 - For requests about an ENZYME activity / class ("alcohol dehydrogenase", "DNA polymerase", "EC
-  3.4.21"), first call find_enzyme_classes to resolve it to an EC number, then search with
+  3.4.21"), first call rcsb_find_enzyme_classes to resolve it to an EC number, then search with
   rcsb_polymer_entity.rcsb_ec_lineage.id exact_match "<EC>" (hierarchical: a full EC finds that
   enzyme, a partial EC like "3.4.21" finds the whole sub-subclass; "in" with several to broaden).
   Prefer higher pdb_entry_count.
 - For requests about a DISEASE or condition ("cystic fibrosis", "breast cancer"), first call
-  find_disease_terms to resolve it to a MONDO id, then search with
+  rcsb_find_disease_terms to resolve it to a MONDO id, then search with
   rcsb_uniprot_annotation.annotation_lineage.id exact_match "MONDO:..." (UniProt-based disease
   annotation; lineage matches the disease and its subtypes; "in" with several to broaden).
   Prefer higher pdb_entry_count.
-- FALLBACK: if a find_* resolver returns no usable match (count 0, or all results have
+- FALLBACK: if a rcsb_find_* resolver returns no usable match (count 0, or all results have
   pdb_entry_count 0), the concept isn't covered by that ontology — fall back to a keyword search
-  (search_fulltext, or search_combined with a full_text term) for it. The resolver's response
+  (rcsb_search_fulltext, or rcsb_search_combined with a full_text term) for it. The resolver's response
   carries a "note" saying so. Also use full text for concepts no ontology covers (tissues, broad
   phenotypes, free-text descriptors).
 
 Return types and fetching details:
 - Every search returns identifiers of ONE return_type. The six valid types — with an example
   id and the Data API tool that fetches their full details — are:
-    entry              whole structure      "4HHB"     -> get_entries
-    polymer_entity     one molecule         "4HHB_1"   -> get_polymer_entities
-    non_polymer_entity ligand entity        "4HHB_3"   -> get_nonpolymer_entities
-    polymer_instance   one chain            "4HHB.A"   -> get_polymer_entity_instances
-    assembly           biological assembly  "4HHB-1"   -> get_assemblies
-    mol_definition     chemical component   "HEM"      -> get_chem_comps
+    entry              whole structure      "4HHB"     -> rcsb_get_entries
+    polymer_entity     one molecule         "4HHB_1"   -> rcsb_get_polymer_entities
+    non_polymer_entity ligand entity        "4HHB_3"   -> rcsb_get_nonpolymer_entities
+    polymer_instance   one chain            "4HHB.A"   -> rcsb_get_polymer_entity_instances
+    assembly           biological assembly  "4HHB-1"   -> rcsb_get_assemblies
+    mol_definition     chemical component   "HEM"      -> rcsb_get_chem_comps
 - The search tools' `enrich` flag auto-attaches entry metadata ONLY when return_type="entry".
-  For any other return_type, take the returned ids and call the matching get_* tool above
+  For any other return_type, take the returned ids and call the matching rcsb_get_* tool above
   (batch all ids into a single call) to get details — do not loop one id at a time.
-- The get_* and seqcoord_* tools return a compact default field set. If you need a property
-  they don't return, call describe_data_object (Data API) or describe_seqcoord_object
+- The rcsb_get_* and rcsb_seqcoord_* tools return a compact default field set. If you need a property
+  they don't return, call rcsb_describe_data_object (Data API) or rcsb_describe_seqcoord_object
   (Sequence Coordinates) with [into=, query=] to find the exact field path, then pass it to
   the tool's `fields=` argument.
 - Every search/Data/Sequence-Coordinates tool response includes a link to the interactive
@@ -234,7 +234,7 @@ def _check_response(resp: httpx.Response, service: str) -> None:
             msg += f" Details: {detail[:300]}"
         if "search" in service.lower():
             msg += (" Verify the attribute path and operator with "
-                    "list_pdb_search_attributes and that the value type matches.")
+                    "rcsb_list_pdb_search_attributes and that the value type matches.")
         raise ValueError(msg)
     if code in (401, 403):
         raise RuntimeError(f"{service} denied the request (HTTP {code}).")
@@ -288,7 +288,7 @@ async def _post_graphql(
 async def _get_json(url: str, params: dict[str, Any], service: str) -> dict[str, Any]:
     """GET a JSON resource (shared headers/timeout) with friendly errors.
 
-    Used by the ontology resolvers (find_* tools) that call EBI web services.
+    Used by the ontology resolvers (rcsb_find_* tools) that call EBI web services.
     """
     try:
         async with httpx.AsyncClient(
@@ -327,9 +327,9 @@ def _graphiql_url(base: str, body: dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# GraphQL schema introspection (powers describe_data_object / describe_seqcoord_object)
+# GraphQL schema introspection (powers rcsb_describe_data_object / rcsb_describe_seqcoord_object)
 # --------------------------------------------------------------------------- #
-# Cached per endpoint so repeated describe_* calls don't re-hit the service. Each
+# Cached per endpoint so repeated rcsb_describe_* calls don't re-hit the service. Each
 # schema is effectively static per process.
 _SCHEMA_CACHE: dict[str, dict[str, Any]] = {}
 _TYPE_REF = "type { kind name ofType { kind name ofType { kind name ofType { kind name } } } }"
@@ -388,7 +388,7 @@ async def _describe_object(
 ) -> dict[str, Any]:
     """Introspect the type returned by `root_field` on `url`; walk `into`; filter by `query`.
 
-    Shared by describe_data_object and describe_seqcoord_object.
+    Shared by rcsb_describe_data_object and rcsb_describe_seqcoord_object.
     """
     type_name = (await _root_field_types(url)).get(root_field)
     if not type_name:
@@ -573,10 +573,10 @@ def _resolver_fallback_note(items: list[dict[str, Any]], label: str) -> str | No
     """Advise a keyword fallback when an ontology resolver finds nothing usable."""
     if not items:
         return (f"No {label} matched this concept. Fall back to a keyword search "
-                "(search_fulltext, or search_combined with a full_text term) for it.")
+                "(rcsb_search_fulltext, or rcsb_search_combined with a full_text term) for it.")
     if all("pdb_entry_count" in it for it in items) and not any(it["pdb_entry_count"] for it in items):
         return (f"Matched {label}(s) but none are annotated in the PDB (pdb_entry_count 0). "
-                "A keyword search (search_fulltext) may still surface relevant structures.")
+                "A keyword search (rcsb_search_fulltext) may still surface relevant structures.")
     return None
 
 
@@ -584,7 +584,7 @@ def _resolver_fallback_note(items: list[dict[str, Any]], label: str) -> str | No
 # Tools
 # --------------------------------------------------------------------------- #
 @mcp.tool(annotations=READ_ONLY)
-async def search_fulltext(
+async def rcsb_search_fulltext(
     query: str,
     return_type: ReturnType = "entry",
     limit: Limit = 10,
@@ -600,18 +600,18 @@ async def search_fulltext(
 
     Best for broad or exploratory keyword lookups. When the request resolves to a
     clear attribute and value (resolution, organism, experimental method, ligand,
-    release date, sequence length, ...), prefer `search_by_attribute` (or
-    `search_combined`) instead — call `list_pdb_search_attributes` first to find the
+    release date, sequence length, ...), prefer `rcsb_search_by_attribute` (or
+    `rcsb_search_combined`) instead — call `rcsb_list_pdb_search_attributes` first to find the
     exact attribute path and operators. Attribute search is more precise and avoids
     spurious keyword matches.
 
     BEFORE keyword-searching a biological CONCEPT, try to resolve it to an ontology id first
     and filter on the annotation (far more precise):
-      - disease / condition (e.g. "diabetes", "cancer")   -> find_disease_terms
-      - molecular function / process / location            -> find_go_terms
-      - protein domain / family / fold                     -> find_interpro_domains
-      - enzyme / catalyzed reaction                        -> find_enzyme_classes
-    Each returns ids to use with search_by_attribute on the matching annotation attribute.
+      - disease / condition (e.g. "diabetes", "cancer")   -> rcsb_find_disease_terms
+      - molecular function / process / location            -> rcsb_find_go_terms
+      - protein domain / family / fold                     -> rcsb_find_interpro_domains
+      - enzyme / catalyzed reaction                        -> rcsb_find_enzyme_classes
+    Each returns ids to use with rcsb_search_by_attribute on the matching annotation attribute.
     If a resolver finds no usable match (count 0, or all pdb_entry_count 0), the concept isn't
     covered by that ontology — THEN fall back to a keyword search here for the concept.
 
@@ -620,7 +620,7 @@ async def search_fulltext(
             Quote a multi-word phrase to require the words adjacent/in order (e.g.
             '"DNA polymerase"'); separate words narrow the results (most must match).
             Trailing '*' is a prefix wildcard. AND/OR/NOT are NOT boolean operators here —
-            for boolean logic across conditions use search_combined.
+            for boolean logic across conditions use rcsb_search_combined.
         return_type: What to return (default "entry"); one of entry, polymer_entity,
             non_polymer_entity, polymer_instance, assembly, mol_definition (see the
             "Return types and fetching details" note in the server instructions).
@@ -662,15 +662,15 @@ async def search_fulltext(
     return _format(raw, enriched, body, offset)
 
 @mcp.tool(annotations=READ_ONLY)
-async def list_pdb_search_attributes(
+async def rcsb_list_pdb_search_attributes(
     query: str | None = None, schema: AttributeSchema = "structure"
 ) -> list[dict[str, Any]]:
     """Discover the RCSB PDB Search schema: attribute paths, value types, and operators.
 
     Call this FIRST whenever the request resolves to a clear attribute and value but
     you don't already know the exact attribute path. Pick the matching attribute here,
-    then run `search_by_attribute` (or `search_combined`). Prefer this structured path
-    over `search_fulltext` whenever a specific attribute and value apply.
+    then run `rcsb_search_by_attribute` (or `rcsb_search_combined`). Prefer this structured path
+    over `rcsb_search_fulltext` whenever a specific attribute and value apply.
 
     Each returned attribute includes:
     - attribute: RCSB/PDB attribute path, e.g. "rcsb_entry_info.resolution_combined"
@@ -684,10 +684,10 @@ async def list_pdb_search_attributes(
             e.g. query="resolution", query="organism".
         schema: Which attribute catalog to search:
             - "structure" (default, ~677 attrs): entry/entity/assembly/instance attributes
-              for structure searches. Use with search_by_attribute / search_combined.
+              for structure searches. Use with rcsb_search_by_attribute / rcsb_search_combined.
             - "chemical" (~57 attrs): chemical-component attributes (chem_comp.*,
               drugbank_info.*, rcsb_chem_comp_*). To search these, pass chemical=True to
-              search_by_attribute / search_combined (usually return_type="mol_definition").
+              rcsb_search_by_attribute / rcsb_search_combined (usually return_type="mol_definition").
 
     Returns:
         A list of {attribute, type, operators, description} dicts — one per matching
@@ -707,7 +707,7 @@ async def list_pdb_search_attributes(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def find_go_terms(
+async def rcsb_find_go_terms(
     query: str,
     namespace: str | None = None,
     limit: ResolverLimit = 10,
@@ -782,7 +782,7 @@ async def find_go_terms(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def find_interpro_domains(
+async def rcsb_find_interpro_domains(
     query: str,
     entry_type: str | None = None,
     limit: ResolverLimit = 10,
@@ -844,7 +844,7 @@ async def find_interpro_domains(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def find_enzyme_classes(
+async def rcsb_find_enzyme_classes(
     query: str,
     limit: ResolverLimit = 10,
     with_pdb_counts: bool = True,
@@ -903,7 +903,7 @@ async def find_enzyme_classes(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def find_disease_terms(
+async def rcsb_find_disease_terms(
     query: str,
     limit: ResolverLimit = 10,
     with_pdb_counts: bool = True,
@@ -966,7 +966,7 @@ async def find_disease_terms(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_by_attribute(
+async def rcsb_search_by_attribute(
     attribute: str,
     operator: TextOperator,
     value: str | int | float | list | dict | None = None,
@@ -982,16 +982,16 @@ async def search_by_attribute(
     group_by_ranking_direction: SortDirection = "desc",
     chemical: bool = False,
 ) -> dict[str, Any]:
-    """Search by a specific structural attribute — preferred over search_fulltext
+    """Search by a specific structural attribute — preferred over rcsb_search_fulltext
     whenever the request resolves to a clear attribute and value. If you don't know
-    the exact attribute path or its operators, call `list_pdb_search_attributes` first.
+    the exact attribute path or its operators, call `rcsb_list_pdb_search_attributes` first.
 
     For a biological concept, resolve it to an ontology id first and filter on the matching
-    annotation attribute: disease -> find_disease_terms (rcsb_uniprot_annotation...);
-    function/process/location -> find_go_terms; domain/family/fold -> find_interpro_domains;
-    enzyme/reaction -> find_enzyme_classes.
+    annotation attribute: disease -> rcsb_find_disease_terms (rcsb_uniprot_annotation...);
+    function/process/location -> rcsb_find_go_terms; domain/family/fold -> rcsb_find_interpro_domains;
+    enzyme/reaction -> rcsb_find_enzyme_classes.
     If a resolver returns no usable id, or a concept/annotation filter yields no hits, fall
-    back to search_fulltext for the concept. (For ordinary constraints — resolution, organism,
+    back to rcsb_search_fulltext for the concept. (For ordinary constraints — resolution, organism,
     dates — an empty result is a valid answer: report it, don't keyword-search instead.)
 
     Examples:
@@ -1007,9 +1007,9 @@ async def search_by_attribute(
           attribute="rcsb_nonpolymer_entity.pdbx_description", operator="exists"
 
     Args:
-        attribute: A dotted RCSB attribute path (see the Search API attribute list: https://search.rcsb.org/structure-search-attributes.html). The `list_pdb_search_attributes` tool can be used to retrieve the list of all available attributes.
+        attribute: A dotted RCSB attribute path (see the Search API attribute list: https://search.rcsb.org/structure-search-attributes.html). The `rcsb_list_pdb_search_attributes` tool can be used to retrieve the list of all available attributes.
         operator: Operators are TYPE-SPECIFIC — use one of the operators that
-            list_pdb_search_attributes reports for this attribute. As a guide:
+            rcsb_list_pdb_search_attributes reports for this attribute. As a guide:
             strings use contains_words/contains_phrase (free text) or exact_match/in
             (enumerated values); numbers and dates use greater, greater_or_equal, less,
             less_or_equal, equals, range; any type supports exists.
@@ -1039,7 +1039,7 @@ async def search_by_attribute(
         group_by_ranking_direction: "asc" or "desc" (default "desc") for group_by_ranking
             (e.g. resolution_combined + "asc" = best-resolution representative).
         chemical: Set True for a chemical-component attribute (a path from
-            list_pdb_search_attributes(schema="chemical"), e.g. "chem_comp.formula_weight").
+            rcsb_list_pdb_search_attributes(schema="chemical"), e.g. "chem_comp.formula_weight").
             Switches to the text_chem service; usually pair with return_type="mol_definition".
     """
     return_type = "polymer_entity" if (group_by_identity or group_by_uniprot) else return_type
@@ -1065,7 +1065,7 @@ async def search_by_attribute(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_combined(
+async def rcsb_search_combined(
     full_text: str | None = None,
     filters: list[dict[str, Any]] | None = None,
     logical_operator: LogicalOperator = "and",
@@ -1087,12 +1087,12 @@ async def search_combined(
     This expresses only a flat list of conditions under one operator. For NESTED boolean
     logic (mixed and/or groups, e.g. "(organism=A OR organism=B) AND date>X") or to combine
     DIFFERENT services (sequence, structure, chemical, seqmotif, strucmotif) in one query, use
-    search_advanced with a raw Search API query body (see https://search.rcsb.org/).
+    rcsb_search_advanced with a raw Search API query body (see https://search.rcsb.org/).
 
     For a biological concept among the constraints, resolve it to an ontology id first and add
-    it as an annotation filter: disease -> find_disease_terms; function/process/location ->
-    find_go_terms; domain/family/fold -> find_interpro_domains; enzyme/reaction ->
-    find_enzyme_classes.
+    it as an annotation filter: disease -> rcsb_find_disease_terms; function/process/location ->
+    rcsb_find_go_terms; domain/family/fold -> rcsb_find_interpro_domains; enzyme/reaction ->
+    rcsb_find_enzyme_classes.
 
     Use this when a request combines multiple conditions, e.g.
     "human hemoglobin structures better than 2 Angstrom resolution":
@@ -1107,7 +1107,7 @@ async def search_combined(
 
     Args:
         full_text: Optional free-text term, combined with the filters.
-        filters: List of {attribute, operator, value} dicts (see search_by_attribute
+        filters: List of {attribute, operator, value} dicts (see rcsb_search_by_attribute
             for operators and attribute paths). Each may also carry optional
             "negation" and "case_sensitive" booleans.
         logical_operator: Combine ALL conditions with a single "and" (default) or "or"
@@ -1134,7 +1134,7 @@ async def search_combined(
         group_by_ranking_direction: "asc" or "desc" (default "desc") for group_by_ranking
             (e.g. resolution_combined + "asc" = best-resolution representative).
         chemical: Set True when the filters target chemical-component attributes (paths
-            from list_pdb_search_attributes(schema="chemical")); switches them to the
+            from rcsb_list_pdb_search_attributes(schema="chemical")); switches them to the
             text_chem service. The full_text term always uses full-text search.
     """
     return_type = "polymer_entity" if (group_by_identity or group_by_uniprot) else return_type
@@ -1160,7 +1160,7 @@ async def search_combined(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_by_sequence(
+async def rcsb_search_by_sequence(
     sequence: str,
     sequence_type: SequenceType = "protein",
     identity_cutoff: Annotated[float, Field(ge=0.0, le=1.0)] = 0.3,
@@ -1176,7 +1176,7 @@ async def search_by_sequence(
         identity_cutoff: Minimum sequence identity as a fraction 0-1 (e.g. 0.3 = 30%).
         evalue_cutoff: Maximum E-value to report.
         limit: Max hits (1-100). Returns polymer_entity IDs like "4HHB_1" — fetch their
-            details with get_polymer_entities.
+            details with rcsb_get_polymer_entities.
         offset: Number of hits to skip, for paging (default 0); pass the response's
             next_offset back with the same query to fetch the next page.
     """
@@ -1193,7 +1193,7 @@ async def search_by_sequence(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_by_chemical(
+async def rcsb_search_by_chemical(
     value: str,
     query_type: ChemQueryType = "descriptor",
     descriptor_type: DescriptorType = "SMILES",
@@ -1239,7 +1239,7 @@ async def search_by_chemical(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_by_structure(
+async def rcsb_search_by_structure(
     entry_id: str,
     assembly_id: str | None = None,
     asym_id: str | None = None,
@@ -1275,7 +1275,7 @@ async def search_by_structure(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_by_seqmotif(
+async def rcsb_search_by_seqmotif(
     pattern: str,
     pattern_type: SeqmotifPatternType = "prosite",
     sequence_type: SequenceType = "protein",
@@ -1291,7 +1291,7 @@ async def search_by_seqmotif(
         pattern_type: "prosite" (default), "regex", or "simple".
         sequence_type: "protein" (default), "dna", or "rna".
         return_type: What to return (default "polymer_entity"); one of the six types
-            (see server instructions). Default hits feed get_polymer_entities.
+            (see server instructions). Default hits feed rcsb_get_polymer_entities.
         limit: Max hits (1-100).
         offset: Number of hits to skip, for paging (default 0); pass the response's
             next_offset back with the same query to fetch the next page.
@@ -1309,11 +1309,11 @@ async def search_by_seqmotif(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
+async def rcsb_search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
     """Run a raw RCSB Search API query body (escape hatch).
 
-    Endpoint: https://search.rcsb.org/rcsbsearch/v2/query . The typed search_* tools cover
-    the common cases (including search_facets, search_count, search_strucmotif); use this for
+    Endpoint: https://search.rcsb.org/rcsbsearch/v2/query . The typed rcsb_search_* tools cover
+    the common cases (including rcsb_search_facets, rcsb_search_count, rcsb_search_strucmotif); use this for
     anything they don't — return_all_hits, group_by "groups", arbitrarily NESTED and/or
     boolean groups, and queries that COMBINE different services (text, full_text, sequence,
     structure, chemical, seqmotif, strucmotif) under one group (e.g. organism AND a
@@ -1341,7 +1341,7 @@ async def search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_count(
+async def rcsb_search_count(
     full_text: str | None = None,
     filters: list[dict[str, Any]] | None = None,
     logical_operator: LogicalOperator = "and",
@@ -1352,7 +1352,7 @@ async def search_count(
     """Return only the NUMBER of matches — use this for "how many ..." questions.
 
     Far cheaper than fetching hits just to count them. Takes the same conditions as
-    search_combined (free text and/or attribute filters). With no conditions it counts
+    rcsb_search_combined (free text and/or attribute filters). With no conditions it counts
     every structure of `return_type`.
 
     Examples:
@@ -1363,7 +1363,7 @@ async def search_count(
 
     Args:
         full_text: Optional free-text term.
-        filters: List of {attribute, operator, value} dicts (see search_by_attribute).
+        filters: List of {attribute, operator, value} dicts (see rcsb_search_by_attribute).
         logical_operator: Combine conditions with "and" (default) or "or".
         return_type: What to count (default "entry"); one of entry, polymer_entity,
             non_polymer_entity, polymer_instance, assembly, mol_definition.
@@ -1383,7 +1383,7 @@ async def search_count(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_facets(
+async def rcsb_search_facets(
     facets: list[dict[str, Any]],
     full_text: str | None = None,
     filters: list[dict[str, Any]] | None = None,
@@ -1396,7 +1396,7 @@ async def search_facets(
     questions (e.g. structures per experimental method, per release year, per organism).
 
     Returns {total_count, facets:[{name, buckets:[{label, population}]}]} and NO hit list.
-    Takes the same optional conditions as search_combined to first narrow the set; with no
+    Takes the same optional conditions as rcsb_search_combined to first narrow the set; with no
     conditions the facets run over all structures.
 
     Each entry in `facets` is a dict:
@@ -1448,7 +1448,7 @@ async def search_facets(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def search_strucmotif(
+async def rcsb_search_strucmotif(
     entry_id: str,
     residue_ids: list[dict[str, Any]],
     backbone_distance_tolerance: Tolerance = 1,
@@ -1464,8 +1464,8 @@ async def search_strucmotif(
     """Find structures containing a 3D STRUCTURAL MOTIF — a geometric arrangement of
     specific residues — like the one in a reference structure.
 
-    This is geometry-based and DIFFERENT from search_by_structure (whole-shape similarity)
-    and from search_by_seqmotif (sequence pattern). Use it for catalytic triads, binding
+    This is geometry-based and DIFFERENT from rcsb_search_by_structure (whole-shape similarity)
+    and from rcsb_search_by_seqmotif (sequence pattern). Use it for catalytic triads, binding
     sites, metal-coordination geometries, etc.
 
     Args:
@@ -1475,7 +1475,7 @@ async def search_strucmotif(
             IMPORTANT: these are the mmCIF *label* identifiers (the internal numbering),
             which often DIFFER from the author residue numbers seen in papers/the PDB
             site. If you only have author numbering, resolve the label_asym_id/label_seq_id
-            first (e.g. via get_polymer_entity_instances) — author numbers give wrong/no hits.
+            first (e.g. via rcsb_get_polymer_entity_instances) — author numbers give wrong/no hits.
             Example (enolase catalytic residues):
             [{"label_asym_id":"A","label_seq_id":162},
              {"label_asym_id":"A","label_seq_id":193},
@@ -1516,19 +1516,19 @@ async def search_strucmotif(
 # selection with your own GraphQL sub-selection (omit the surrounding braces).
 # --------------------------------------------------------------------------- #
 @mcp.tool(annotations=READ_ONLY)
-async def describe_data_object(
+async def rcsb_describe_data_object(
     object_key: str, into: str | None = None, query: str | None = None
 ) -> dict[str, Any]:
     """Discover the fields available on a Data API object, from the live GraphQL schema.
 
-    Use this to find exactly what to request in a get_* tool's `fields=` argument (or
-    in data_graphql). The get_* default selections are compact summaries, but the
+    Use this to find exactly what to request in a rcsb_get_* tool's `fields=` argument (or
+    in rcsb_data_graphql). The rcsb_get_* default selections are compact summaries, but the
     underlying GraphQL types have far more (e.g. CoreEntry has ~100 fields). This tool
     walks the schema so you can build a precise selection instead of guessing.
 
-    Workflow: describe_data_object("entries") -> spot a nested object field such as
-    "rcsb_entry_info" -> describe_data_object("entries", into="rcsb_entry_info") to list
-    its leaves -> call get_entries(ids, fields="rcsb_entry_info{ ... }").
+    Workflow: rcsb_describe_data_object("entries") -> spot a nested object field such as
+    "rcsb_entry_info" -> rcsb_describe_data_object("entries", into="rcsb_entry_info") to list
+    its leaves -> call rcsb_get_entries(ids, fields="rcsb_entry_info{ ... }").
 
     Each returned field has:
     - name: the GraphQL field name
@@ -1538,7 +1538,7 @@ async def describe_data_object(
     - description: schema description, when present
 
     Args:
-        object_key: Which object to describe — a key matching the get_* tools, e.g.
+        object_key: Which object to describe — a key matching the rcsb_get_* tools, e.g.
             "entries", "polymer_entities", "assemblies", "chem_comps", "interfaces",
             "uniprot", ... (entry_annotations/entry_exp_info also map to the entry type).
         into: Optional dot-path of nested object field(s) to drill into, e.g.
@@ -1558,7 +1558,7 @@ async def describe_data_object(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_entries(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_entries(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch metadata for one or more PDB entries (title, method, resolution, size,
     dates, primary citation, and publication abstract).
 
@@ -1567,17 +1567,17 @@ async def get_entries(entry_ids: list[str], fields: str | None = None) -> dict[s
 
     The response also lists the entry's component ids under
     rcsb_entry_container_identifiers — use these to drill into the structure. They are
-    bare numbers; compose them with the entry id to call the matching get_* tool:
-    polymer_entity_ids/non_polymer_entity_ids "N" -> "<ENTRY>_N" (get_polymer_entities /
-    get_nonpolymer_entities); assembly_ids "N" -> "<ENTRY>-N" (get_assemblies).
+    bare numbers; compose them with the entry id to call the matching rcsb_get_* tool:
+    polymer_entity_ids/non_polymer_entity_ids "N" -> "<ENTRY>_N" (rcsb_get_polymer_entities /
+    rcsb_get_nonpolymer_entities); assembly_ids "N" -> "<ENTRY>-N" (rcsb_get_assemblies).
 
-    For fields beyond this summary, use describe_data_object("entries") to find the
+    For fields beyond this summary, use rcsb_describe_data_object("entries") to find the
     path and pass it via `fields`.
     """
     return await _query_batch("entries", entry_ids, fields)
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_entry_annotations(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_entry_annotations(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch biological and functional annotations for one or more PDB entries, including Gene Ontology terms (molecular function, biological process, and cellular component), protein domain classifications, disease associations, antibody annotations, gene product information, and other biological annotations.
 
     IDs are 4-character entry codes, e.g. ["4HHB", "1MBN"]. Unknown IDs are
@@ -1586,7 +1586,7 @@ async def get_entry_annotations(entry_ids: list[str], fields: str | None = None)
     return await _query_batch("entry_annotations", entry_ids, fields)
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_entry_exp_info(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_entry_exp_info(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch detailed experimental conditions and structure-determination metadata for one or more PDB entries, including sample temperature, pH, pressure, experimental method, diffraction data, and other reported experimental parameters.
 
     IDs are 4-character entry codes, e.g. ["4HHB", "1MBN"]. Unknown IDs are
@@ -1596,52 +1596,52 @@ async def get_entry_exp_info(entry_ids: list[str], fields: str | None = None) ->
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_polymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_polymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entities (protein/nucleic-acid molecules).
 
     IDs combine entry + entity number, e.g. ["4HHB_1"] — exactly what
-    search_by_sequence returns. Default fields: description, sequence, length,
+    rcsb_search_by_sequence returns. Default fields: description, sequence, length,
     weight, and source organism.
     """
     return await _query_batch("polymer_entities", entity_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_nonpolymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_nonpolymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer (ligand/cofactor) entities, e.g. ["4HHB_3"].
 
     Default fields: description, weight, copy count, and the bound chemical
-    component ID. Use get_chem_comps for the chemistry of that component.
+    component ID. Use rcsb_get_chem_comps for the chemistry of that component.
     """
     return await _query_batch("nonpolymer_entities", entity_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_branched_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_branched_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch branched (carbohydrate / oligosaccharide) entities, e.g. ["5FMB_2"]."""
     return await _query_batch("branched_entities", entity_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_polymer_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_polymer_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entity instances (individual chains), e.g. ["4HHB.A"] (entry.asym_id)."""
     return await _query_batch("polymer_entity_instances", instance_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_nonpolymer_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_nonpolymer_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer entity instances (individual bound ligands), e.g. ["4HHB.E"]."""
     return await _query_batch("nonpolymer_entity_instances", instance_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_branched_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_branched_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch branched entity instances (individual glycan chains), e.g. ["5FMB.C"]."""
     return await _query_batch("branched_entity_instances", instance_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_assemblies(assembly_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_assemblies(assembly_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch biological assemblies, e.g. ["4HHB-1"] (entry-assembly).
 
     Default fields: composition counts and oligomeric state.
@@ -1650,7 +1650,7 @@ async def get_assemblies(assembly_ids: list[str], fields: str | None = None) -> 
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_interfaces(interface_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_interfaces(interface_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch assembly interfaces, e.g. ["1BMV-1.1"] (entry-assembly.interface).
 
     Default fields: buried area, character, composition, residue count.
@@ -1659,7 +1659,7 @@ async def get_interfaces(interface_ids: list[str], fields: str | None = None) ->
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_chem_comps(comp_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_chem_comps(comp_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch chemical components / ligands by their short codes, e.g. ["HEM", "ATP"].
 
     Default fields: name, formula, weight, type, SMILES, InChIKey.
@@ -1668,25 +1668,25 @@ async def get_chem_comps(comp_ids: list[str], fields: str | None = None) -> dict
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_entry_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_entry_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch entry groups (clusters of related entries) by group ID."""
     return await _query_batch("entry_groups", group_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_polymer_entity_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_polymer_entity_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entity groups (e.g. sequence clusters), e.g. ["85_70"]."""
     return await _query_batch("polymer_entity_groups", group_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_nonpolymer_entity_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_nonpolymer_entity_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer entity groups (clusters of related ligands) by group ID."""
     return await _query_batch("nonpolymer_entity_groups", group_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_uniprot(uniprot_id: str, fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_uniprot(uniprot_id: str, fields: str | None = None) -> dict[str, Any]:
     """Fetch the UniProt record RCSB maps to an accession, e.g. "P69905".
 
     Default fields: accession(s), entry name, protein name, source organism.
@@ -1695,7 +1695,7 @@ async def get_uniprot(uniprot_id: str, fields: str | None = None) -> dict[str, A
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_pubmed(pubmed_id: int, fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_pubmed(pubmed_id: int, fields: str | None = None) -> dict[str, Any]:
     """Fetch the PubMed record for a citation by its integer ID, e.g. 6726807.
 
     Default fields: PubMed Central ID, DOI, abstract text.
@@ -1704,16 +1704,16 @@ async def get_pubmed(pubmed_id: int, fields: str | None = None) -> dict[str, Any
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_group_provenance(group_provenance_id: str, fields: str | None = None) -> dict[str, Any]:
+async def rcsb_get_group_provenance(group_provenance_id: str, fields: str | None = None) -> dict[str, Any]:
     """Fetch provenance/method metadata for a grouping, e.g. "provenance_sequence_identity"."""
     return await _query_single("group_provenance", group_provenance_id, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def data_graphql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+async def rcsb_data_graphql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run an arbitrary GraphQL query against the RCSB Data API (escape hatch).
 
-    Endpoint: https://data.rcsb.org/graphql . The get_* tools cover every root
+    Endpoint: https://data.rcsb.org/graphql . The rcsb_get_* tools cover every root
     field with curated defaults; reach for this only when you need fields or
     nesting they don't expose, or to combine several objects in one query.
     Returns the raw {"data": ..., "errors": ...} payload so query/validation
@@ -1742,9 +1742,9 @@ async def data_graphql(query: str, variables: dict[str, Any] | None = None) -> d
 # Map alignments and positional annotations between sequence reference systems
 # (UniProt, NCBI, PDB entity/instance). Each returns the raw selected GraphQL
 # node(s); pass `fields` to override the default selection (use
-# describe_seqcoord_object to discover what to request).
+# rcsb_describe_seqcoord_object to discover what to request).
 # --------------------------------------------------------------------------- #
-# The five Sequence Coordinates root fields, for describe_seqcoord_object.
+# The five Sequence Coordinates root fields, for rcsb_describe_seqcoord_object.
 SEQCOORD_OBJECTS = {
     "alignments", "annotations",
     "group_alignments", "group_annotations", "group_annotations_summary",
@@ -1752,18 +1752,18 @@ SEQCOORD_OBJECTS = {
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def describe_seqcoord_object(
+async def rcsb_describe_seqcoord_object(
     object_key: str, into: str | None = None, query: str | None = None
 ) -> dict[str, Any]:
     """Discover the fields available on a Sequence Coordinates object, from the live schema.
 
-    The Sequence Coordinates analogue of describe_data_object. The seqcoord_* tools
+    The Sequence Coordinates analogue of rcsb_describe_data_object. The rcsb_seqcoord_* tools
     return a compact default selection; use this to find what else you can request via
-    their `fields=` argument (or via seqcoord_graphql).
+    their `fields=` argument (or via rcsb_seqcoord_graphql).
 
-    Workflow: describe_seqcoord_object("alignments") -> spot a nested object such as
-    "target_alignments" -> describe_seqcoord_object("alignments", into="target_alignments")
-    to list its leaves -> call seqcoord_alignments(..., fields="target_alignments{ ... }").
+    Workflow: rcsb_describe_seqcoord_object("alignments") -> spot a nested object such as
+    "target_alignments" -> rcsb_describe_seqcoord_object("alignments", into="target_alignments")
+    to list its leaves -> call rcsb_seqcoord_alignments(..., fields="target_alignments{ ... }").
 
     Each returned field has name, kind ("scalar" leaf or "object" — drill in with `into`),
     type, list (whether it's a list), and description (when present).
@@ -1789,7 +1789,7 @@ async def describe_seqcoord_object(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def seqcoord_alignments(
+async def rcsb_seqcoord_alignments(
     query_id: str,
     from_ref: SequenceRef,
     to_ref: SequenceRef,
@@ -1849,7 +1849,7 @@ async def seqcoord_alignments(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def seqcoord_annotations(
+async def rcsb_seqcoord_annotations(
     query_id: str,
     reference: SequenceRef,
     sources: list[AnnotationRef],
@@ -1885,7 +1885,7 @@ async def seqcoord_annotations(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def seqcoord_group_alignments(
+async def rcsb_seqcoord_group_alignments(
     group: GroupRef,
     group_id: str,
     filter_terms: list[str] | None = None,
@@ -1911,7 +1911,7 @@ async def seqcoord_group_alignments(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def seqcoord_group_annotations(
+async def rcsb_seqcoord_group_annotations(
     group: GroupRef,
     group_id: str,
     sources: list[AnnotationRef],
@@ -1930,7 +1930,7 @@ async def seqcoord_group_annotations(
         sources: Annotation source(s) to pull features from.
         summary: If true, return a positional summary aggregated across the group
             (group_annotations_summary) instead of per-member annotations.
-        filters: Optional filter dicts (see seqcoord_annotations).
+        filters: Optional filter dicts (see rcsb_seqcoord_annotations).
         fields: Optional GraphQL selection to override the default.
     """
     body = queries.build_sc_group_annotations_query(
@@ -1946,11 +1946,11 @@ async def seqcoord_group_annotations(
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def seqcoord_graphql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+async def rcsb_seqcoord_graphql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run an arbitrary GraphQL query against the RCSB Sequence Coordinates API.
 
     Endpoint: https://sequence-coordinates.rcsb.org/graphql . Escape hatch for
-    fields/arguments the typed seqcoord_* tools don't expose. Root fields:
+    fields/arguments the typed rcsb_seqcoord_* tools don't expose. Root fields:
     alignments, annotations, group_alignments, group_annotations,
     group_annotations_summary. Returns the raw {"data": ..., "errors": ...} payload.
 

@@ -25,13 +25,13 @@ src/rcsb_mcp/
 - **Pure builders vs. I/O.** `queries.py` builds request bodies and contains **no
   network code**, so it stays unit-testable. `server.py` does the HTTP and exposes
   the tools. Keep new query-construction logic in `queries.py`.
-- **The `DATA_OBJECTS` registry** (`queries.py`) drives every Data API `get_*` tool:
+- **The `DATA_OBJECTS` registry** (`queries.py`) drives every Data API `rcsb_get_*` tool:
   one entry per GraphQL root field (root field, id arg, batch/single, default field
   selection). **Adding a Data API object is ideally a one-line registry entry.**
-- **Compact defaults + escape hatches.** Each `get_*`/`seqcoord_*` tool returns a
-  curated compact field selection but accepts a `fields=` override; `describe_data_object`
-  / `describe_seqcoord_object` introspect the live schema for discovery; `data_graphql` /
-  `seqcoord_graphql` are raw passthroughs. Don't try to make defaults exhaustive.
+- **Compact defaults + escape hatches.** Each `rcsb_get_*`/`rcsb_seqcoord_*` tool returns a
+  curated compact field selection but accepts a `fields=` override; `rcsb_describe_data_object`
+  / `rcsb_describe_seqcoord_object` introspect the live schema for discovery; `rcsb_data_graphql` /
+  `rcsb_seqcoord_graphql` are raw passthroughs. Don't try to make defaults exhaustive.
 - **Server `instructions` = tool-usage guidance only** (routing, chaining, return
   types). Do **not** put application/presentation policy there — it's always-on for
   every client. That belongs in the project prompt.

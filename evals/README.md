@@ -17,16 +17,16 @@ used. All 10 answers were verified against the live RCSB APIs on **2026-06-24**.
 
 | # | Answer | Capability under test (expected tool path) |
 |---|--------|--------------------------------------------|
-| 1 | `P68871` | entry → entities → pick the *beta* subunit → UniProt mapping (`get_entries` → `get_polymer_entities` → `seqcoord_alignments`/field discovery) |
-| 2 | `KABFMIBPWCXCRK-RGGAHWMASA-L` | entry → identify the 4-copy heme ligand → chem-component InChIKey (`get_entries` → `get_nonpolymer_entities` → `get_chem_comps`) |
-| 3 | `4` | biological-assembly composition (`get_entries` → `get_assemblies`); must count polymer, not non-polymer, instances |
-| 4 | `Physeter macrocephalus` | source-organism binomial of a polymer entity (`get_polymer_entities`) |
-| 5 | `STI` | entry → ligand discovery, disambiguating the inhibitor from the chloride ion (`get_entries` → `get_nonpolymer_entities`) |
-| 6 | `NAD` | batch chem-component fetch + numeric comparison across four ligands (`get_chem_comps`) |
-| 7 | `10.1016/j.cell.2020.02.058` | primary-citation DOI of a cryo-EM entry (`get_entries`) |
-| 8 | `P00520` | NCBI/UniProt cross-reference via Sequence Coordinates — note the murine Abl accession, not the human one (`seqcoord_alignments`) |
-| 9 | `IPR000980` | free-text domain → InterPro id via the ontology resolver (`find_interpro_domains`) |
-| 10 | `MONDO:0009061` | free-text disease → MONDO id via the ontology resolver (`find_disease_terms`) |
+| 1 | `P68871` | entry → entities → pick the *beta* subunit → UniProt mapping (`rcsb_get_entries` → `rcsb_get_polymer_entities` → `rcsb_seqcoord_alignments`/field discovery) |
+| 2 | `KABFMIBPWCXCRK-RGGAHWMASA-L` | entry → identify the 4-copy heme ligand → chem-component InChIKey (`rcsb_get_entries` → `rcsb_get_nonpolymer_entities` → `rcsb_get_chem_comps`) |
+| 3 | `4` | biological-assembly composition (`rcsb_get_entries` → `rcsb_get_assemblies`); must count polymer, not non-polymer, instances |
+| 4 | `Physeter macrocephalus` | source-organism binomial of a polymer entity (`rcsb_get_polymer_entities`) |
+| 5 | `STI` | entry → ligand discovery, disambiguating the inhibitor from the chloride ion (`rcsb_get_entries` → `rcsb_get_nonpolymer_entities`) |
+| 6 | `NAD` | batch chem-component fetch + numeric comparison across four ligands (`rcsb_get_chem_comps`) |
+| 7 | `10.1016/j.cell.2020.02.058` | primary-citation DOI of a cryo-EM entry (`rcsb_get_entries`) |
+| 8 | `P00520` | NCBI/UniProt cross-reference via Sequence Coordinates — note the murine Abl accession, not the human one (`rcsb_seqcoord_alignments`) |
+| 9 | `IPR000980` | free-text domain → InterPro id via the ontology resolver (`rcsb_find_interpro_domains`) |
+| 10 | `MONDO:0009061` | free-text disease → MONDO id via the ontology resolver (`rcsb_find_disease_terms`) |
 
 ## Running it
 
@@ -73,5 +73,5 @@ solve it directly against the live API, e.g.:
 ```python
 import asyncio
 from rcsb_mcp import server
-print(asyncio.run(server.get_chem_comps(["HEM", "ATP", "NAD", "STI"])))
+print(asyncio.run(server.rcsb_get_chem_comps(["HEM", "ATP", "NAD", "STI"])))
 ```

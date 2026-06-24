@@ -1,6 +1,6 @@
 <evaluation>
    <!--
-     Evaluation suite for the rcsb-pdb MCP server (see evals/README.md).
+     Evaluation suite for the rcsb_mcp server (see evals/README.md).
      Every answer was verified against the live RCSB APIs on 2026-06-24.
      Questions are anchored to deposited-structure metadata (resolution, dates,
      sequences, ligands, citations, cross-references), which is immutable once
