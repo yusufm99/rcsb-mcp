@@ -58,4 +58,8 @@
       <question>Using the Sequence Coordinates API, map the beta-globin polymer entity of PDB entry 4HHB (entity 4HHB_2) to the NCBI RefSeq protein database. What single NCBI protein accession does it correspond to?</question>
       <answer>NP_000509</answer>
    </qa_pair>
+   <qa_pair>
+      <question>Using the organism resolver, resolve the taxonomic class Mammalia (the clade containing all mammals) to its NCBI Taxonomy identifier. What is the numeric taxonomy id?</question>
+      <answer>40674</answer>
+   </qa_pair>
 </evaluation>

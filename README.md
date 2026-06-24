@@ -22,6 +22,7 @@ Bank structures** — discover, inspect, and cross-reference — from LLM client
 | `rcsb_find_interpro_domains` | Resolve a free-text protein domain / family / fold to InterPro ids (via EBI InterPro API), annotated with PDB entry counts — then search by `rcsb_polymer_entity_annotation.annotation_id`. |
 | `rcsb_find_enzyme_classes` | Resolve a free-text enzyme / reaction to Enzyme Commission (EC) numbers (via EBI Search/IntEnz), annotated with PDB entry counts — then search by `rcsb_polymer_entity.rcsb_ec_lineage.id` (hierarchical). |
 | `rcsb_find_disease_terms` | Resolve a free-text disease / condition to MONDO ids (via EBI OLS), annotated with PDB entry counts — then search by `rcsb_uniprot_annotation.annotation_lineage.id` (hierarchical, UniProt-based). |
+| `rcsb_find_organisms` | Resolve a free-text organism / common name / clade to NCBI Taxonomy ids (via UniProt taxonomy), annotated with PDB entry counts — then search by `rcsb_entity_source_organism.taxonomy_lineage.id` (hierarchical: a clade id matches every organism beneath it). |
 | `rcsb_search_fulltext` | Free-text keyword search (e.g. `"CRISPR Cas9"`). |
 | `rcsb_search_by_attribute` | Structured search on an indexed attribute (resolution, organism, release date, ...). Supports `exists`, `negation`, `case_sensitive`, and `chemical=True` (text_chem). |
 | `rcsb_search_combined` | Combine free text + multiple attribute filters (AND/OR) in one query, with optional sort. |
@@ -166,6 +167,7 @@ Restart Claude Desktop. The tools appear under the connectors (plug) icon.
 - "Structures containing an SH2 domain / immunoglobulin fold." → `rcsb_find_interpro_domains` → `rcsb_search_by_attribute` on `rcsb_polymer_entity_annotation.annotation_id`
 - "Alcohol dehydrogenase structures / any EC 3.4.21 serine protease." → `rcsb_find_enzyme_classes` → `rcsb_search_by_attribute` on `rcsb_polymer_entity.rcsb_ec_lineage.id`
 - "Structures of proteins associated with cystic fibrosis / breast cancer." → `rcsb_find_disease_terms` → `rcsb_search_by_attribute` on `rcsb_uniprot_annotation.annotation_lineage.id`
+- "Structures from mammals / from a particular organism or clade." → `rcsb_find_organisms` → `rcsb_search_by_attribute` on `rcsb_entity_source_organism.taxonomy_lineage.id`
 - "Non-redundant human kinase structures (90% identity clusters)." → `rcsb_search_fulltext` / `rcsb_search_combined` with `group_by_identity=90`
 - "How many human X-ray structures are there?" → `rcsb_search_count`
 - "Break down ribosome structures by experimental method / by release year." → `rcsb_search_facets`

@@ -120,6 +120,10 @@ INTENZ_SEARCH_URL = "https://www.ebi.ac.uk/ebisearch/ws/rest/intenz"
 # Disease resolver — EBI Ontology Lookup Service (OLS4) over MONDO (text -> MONDO id).
 OLS_SEARCH_URL = "https://www.ebi.ac.uk/ols4/api/search"
 
+# Organism / taxon resolver — UniProt taxonomy REST (text -> NCBI Taxonomy id). UniProt's
+# taxonId IS the NCBI Taxonomy id, which feeds rcsb_entity_source_organism.taxonomy_lineage.id.
+UNIPROT_TAXONOMY_SEARCH_URL = "https://rest.uniprot.org/taxonomy/search"
+
 mcp = FastMCP(
     name="rcsb_mcp",
     instructions="""You are an assistant for interrogating Protein Data Bank structures via the
@@ -185,6 +189,13 @@ Other capabilities:
   rcsb_uniprot_annotation.annotation_lineage.id exact_match "MONDO:..." (UniProt-based disease
   annotation; lineage matches the disease and its subtypes; "in" with several to broaden).
   Prefer higher pdb_entry_count.
+- For requests restricting by SOURCE ORGANISM or a higher taxon ("human", "mouse", "mammals",
+  "bacteria", "Escherichia coli"), first call rcsb_find_organisms to resolve it to an NCBI taxon
+  id, then search with rcsb_entity_source_organism.taxonomy_lineage.id exact_match "<taxId>" —
+  pass the id as a STRING ("9606", not 9606). The lineage is each entity's full ancestor chain,
+  so a species id finds that species and a clade id (e.g. "40674" = Mammalia) finds every
+  organism beneath it; "in" with several to broaden. For a known exact species,
+  ncbi_scientific_name exact_match also works. Prefer higher pdb_entry_count.
 - FALLBACK: if a rcsb_find_* resolver returns no usable match (count 0, or all results have
   pdb_entry_count 0), the concept isn't covered by that ontology — fall back to a keyword search
   (rcsb_search_fulltext, or rcsb_search_combined with a full_text term) for it. The resolver's response
@@ -291,7 +302,7 @@ async def _post_graphql(
 async def _get_json(url: str, params: dict[str, Any], service: str) -> dict[str, Any]:
     """GET a JSON resource (shared headers/timeout) with friendly errors.
 
-    Used by the ontology resolvers (rcsb_find_* tools) that call EBI web services.
+    Used by the ontology resolvers (rcsb_find_* tools) that call EBI and UniProt web services.
     """
     try:
         async with httpx.AsyncClient(
@@ -968,6 +979,80 @@ async def rcsb_find_disease_terms(
             disease["pdb_entry_count"] = count
     result = {"query": query, "count": len(diseases), "diseases": diseases}
     note = _resolver_fallback_note(diseases, "MONDO disease term")
+    if note:
+        result["note"] = note
+    return result
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def rcsb_find_organisms(
+    query: str,
+    limit: ResolverLimit = 10,
+    with_pdb_counts: bool = True,
+) -> dict[str, Any]:
+    """Resolve a free-text organism, common name, or clade (e.g. human, mouse, baker's yeast,
+    Escherichia coli, mammals, bacteria, primates) to NCBI Taxonomy ids, for precise
+    taxonomy-based PDB searches instead of keyword guessing.
+
+    Use this whenever a request restricts structures by SOURCE ORGANISM or any higher taxon —
+    "structures from <organism>", "<clade> proteins", a common name you want as a canonical
+    taxon ("human", "fruit fly"), or "members of the <family/order/class> ...". Resolve the
+    phrase to an NCBI taxon id here, then search by it:
+    `rcsb_entity_source_organism.taxonomy_lineage.id` exact_match "<taxId>" — each entity's
+    taxonomy_lineage is its full NCBI ancestor chain, so this matches the taxon AND every
+    organism beneath it (a species id like "9606" finds Homo sapiens; a clade id like "40674"
+    finds all of Mammalia). Pass the id as a STRING: the attribute is string-typed, so
+    value="9606" works while value=9606 is rejected. Use the `in` operator with several ids to
+    broaden. (`rcsb_entity_source_organism.taxonomy_lineage.name` is the string-name equivalent;
+    prefer the id.)
+
+    For a known exact binomial (e.g. "Homo sapiens"), a direct
+    `rcsb_entity_source_organism.ncbi_scientific_name` exact_match search also works — this tool
+    is most valuable for common names and for CLADES, which a plain name search cannot expand.
+
+    Args:
+        query: Free-text organism / clade / common name, e.g. "human", "mammals", "E. coli".
+        limit: Max taxa to return (1-25).
+        with_pdb_counts: If true (default), annotate each taxon with pdb_entry_count (PDB
+            entries from it or any organism beneath it, via taxonomy_lineage.id) so you can
+            prefer well-represented taxa — this also disambiguates a species from its strains.
+
+    Returns:
+        {query, count, taxa:[{tax_id, scientific_name, common_name, rank, pdb_entry_count?}]}.
+    """
+    # Over-fetch so de-duplication still fills `limit` (UniProt can return many strains).
+    fetch = min(limit * 3, 50)
+    data = await _get_json(
+        UNIPROT_TAXONOMY_SEARCH_URL,
+        {"query": query, "size": fetch, "fields": "id,scientific_name,common_name,rank"},
+        "UniProt taxonomy",
+    )
+    taxa: list[dict[str, Any]] = []
+    seen: set[Any] = set()
+    for r in data.get("results") or []:
+        tid = r.get("taxonId")
+        if tid is None or tid in seen:
+            continue
+        seen.add(tid)
+        taxa.append({
+            "tax_id": tid,
+            "scientific_name": r.get("scientificName"),
+            "common_name": r.get("commonName"),
+            "rank": r.get("rank"),
+        })
+        if len(taxa) >= limit:
+            break
+    if with_pdb_counts and taxa:
+        counts = await asyncio.gather(*(
+            _annotation_pdb_count(
+                "rcsb_entity_source_organism.taxonomy_lineage.id", str(t["tax_id"])
+            )
+            for t in taxa
+        ))
+        for taxon, count in zip(taxa, counts):
+            taxon["pdb_entry_count"] = count
+    result = {"query": query, "count": len(taxa), "taxa": taxa}
+    note = _resolver_fallback_note(taxa, "NCBI taxon")
     if note:
         result["note"] = note
     return result

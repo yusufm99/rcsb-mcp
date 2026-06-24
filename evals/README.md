@@ -1,6 +1,6 @@
 # Evaluation suite
 
-[`rcsb_pdb_eval.xml`](rcsb_pdb_eval.xml) is a set of 13 read-only questions that
+[`rcsb_pdb_eval.xml`](rcsb_pdb_eval.xml) is a set of 14 read-only questions that
 measure how well an LLM — given **only** this MCP server's tools and no other
 context — can answer realistic Protein Data Bank questions. It follows the
 `mcp-builder` skill's evaluation format (one `<qa_pair>` per question), and is
@@ -11,7 +11,7 @@ Every question is **independent**, **read-only**, and has a **single, stable**
 answer. Answers are anchored to deposited-structure metadata (sequences,
 ligands, assemblies, citations, cross-references), which is immutable once a
 structure is released — so they don't drift over time. No dynamic counts are
-used. All 13 answers were verified against the live RCSB APIs on **2026-06-24**.
+used. All 14 answers were verified against the live RCSB APIs on **2026-06-24**.
 
 ## What each question exercises
 
@@ -30,6 +30,7 @@ used. All 13 answers were verified against the live RCSB APIs on **2026-06-24**.
 | 11 | `GO:0004096` | free-text molecular function → GO id via the ontology resolver (`rcsb_find_go_terms`) |
 | 12 | `4.2.1.1` | free-text enzyme → EC number via the enzyme-classification resolver (`rcsb_find_enzyme_classes`) |
 | 13 | `NP_000509` | polymer entity → NCBI RefSeq protein cross-reference via Sequence Coordinates (`rcsb_seqcoord_alignments`) |
+| 14 | `40674` | free-text clade → NCBI Taxonomy id via the organism resolver, picking the class *Mammalia* over noisier top hits (`rcsb_find_organisms`) |
 
 ## Running it
 
