@@ -15,7 +15,7 @@ src/rcsb_mcp/
   server.py                  MCP server: @mcp.tool() tools, HTTP calls, schema introspection
   queries.py                 PURE request-body builders (no network) + the DATA_OBJECTS registry
   graphql_queries.py         Large GraphQL field-selection constants (ENTRY_ANNOTATIONS, ...)
-  search_attibutes.py        SEARCH_ATTRIBUTES catalog (structure search schema)  [sic: "attibutes"]
+  search_attributes.py       SEARCH_ATTRIBUTES catalog (structure search schema)
   chemical_search_attributes.py  CHEMICAL_SEARCH_ATTRIBUTES catalog — auto-generated (see scripts/)
   test_queries.py            Network-free unit tests for the query builders
 ```

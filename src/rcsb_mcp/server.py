@@ -25,9 +25,10 @@ from urllib.parse import quote
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from starlette.responses import PlainTextResponse
 
-from rcsb_mcp.search_attibutes import SEARCH_ATTRIBUTES
+from rcsb_mcp.search_attributes import SEARCH_ATTRIBUTES
 from rcsb_mcp.chemical_search_attributes import CHEMICAL_SEARCH_ATTRIBUTES
 from rcsb_mcp import queries
 
@@ -41,6 +42,16 @@ DATA_GRAPHIQL_URL = "https://data.rcsb.org/graphiql/index.html"
 SEQCOORD_GRAPHIQL_URL = "https://sequence-coordinates.rcsb.org/graphiql/index.html"
 USER_AGENT = "rcsb-mcp/0.1 (https://github.com/rcsb/rcsb-mcp)"
 TIMEOUT = httpx.Timeout(30.0)
+
+# Every tool in this server is a read-only query against public RCSB/EBI web
+# APIs: it never mutates state, repeated calls are safe (idempotent), and it
+# reaches external services (open world). Shared by all @mcp.tool decorators.
+READ_ONLY = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
 
 # Attribute catalogs by schema name (see list_pdb_search_attributes).
 ATTRIBUTE_CATALOGS = {"structure": SEARCH_ATTRIBUTES, "chemical": CHEMICAL_SEARCH_ATTRIBUTES}
@@ -163,14 +174,54 @@ Return types and fetching details:
 # --------------------------------------------------------------------------- #
 # Low-level HTTP helpers
 # --------------------------------------------------------------------------- #
+def _check_response(resp: httpx.Response, service: str) -> None:
+    """Raise a clear, actionable error for a non-2xx response.
+
+    Replaces httpx's terse ``raise_for_status``: maps the status codes these
+    public APIs actually return to messages that tell the agent what to do next
+    (e.g. a 400 from a bad attribute path, a 429 rate limit). Returns silently
+    for any 2xx (callers handle 204 before calling this).
+    """
+    if resp.is_success:
+        return
+    code = resp.status_code
+    if code == 400:
+        # The body usually explains the rejection (bad attribute, operator, or
+        # value type); surface a trimmed copy plus how to fix a search query.
+        detail = " ".join((resp.text or "").split())
+        msg = f"{service} rejected the request (HTTP 400)."
+        if detail:
+            msg += f" Details: {detail[:300]}"
+        if "search" in service.lower():
+            msg += (" Verify the attribute path and operator with "
+                    "list_pdb_search_attributes and that the value type matches.")
+        raise ValueError(msg)
+    if code in (401, 403):
+        raise RuntimeError(f"{service} denied the request (HTTP {code}).")
+    if code == 404:
+        raise RuntimeError(f"{service} resource not found (HTTP 404).")
+    if code == 429:
+        raise RuntimeError(
+            f"{service} rate limit exceeded (HTTP 429). Wait a few seconds and retry."
+        )
+    if code >= 500:
+        raise RuntimeError(f"{service} is unavailable (HTTP {code}); try again shortly.")
+    raise RuntimeError(f"{service} request failed (HTTP {code}).")
+
+
 async def _post_search(body: dict[str, Any]) -> dict[str, Any]:
     """POST a query to the Search API. Returns a normalized result dict."""
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
-        resp = await client.post(SEARCH_URL, json=body)
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
+            resp = await client.post(SEARCH_URL, json=body)
+    except httpx.TimeoutException:
+        raise RuntimeError("RCSB Search API timed out; try again or narrow the query.") from None
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"RCSB Search API connection error ({type(exc).__name__}).") from None
     # The API returns 204 No Content when nothing matches.
     if resp.status_code == 204:
         return {"total_count": 0, "result_set": []}
-    resp.raise_for_status()
+    _check_response(resp, "RCSB Search API")
     return resp.json()
 
 
@@ -183,9 +234,32 @@ async def _post_graphql(
     an ``errors`` array, so callers must inspect that rather than HTTP status.
     """
     body = {"query": query, "variables": variables or {}}
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
-        resp = await client.post(url, json=body)
-    resp.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
+            resp = await client.post(url, json=body)
+    except httpx.TimeoutException:
+        raise RuntimeError("RCSB GraphQL API timed out; try again or simplify the query.") from None
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"RCSB GraphQL API connection error ({type(exc).__name__}).") from None
+    _check_response(resp, "RCSB GraphQL API")
+    return resp.json()
+
+
+async def _get_json(url: str, params: dict[str, Any], service: str) -> dict[str, Any]:
+    """GET a JSON resource (shared headers/timeout) with friendly errors.
+
+    Used by the ontology resolvers (find_* tools) that call EBI web services.
+    """
+    try:
+        async with httpx.AsyncClient(
+            timeout=TIMEOUT, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
+        ) as client:
+            resp = await client.get(url, params=params)
+    except httpx.TimeoutException:
+        raise RuntimeError(f"{service} timed out; try again shortly.") from None
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"{service} connection error ({type(exc).__name__}).") from None
+    _check_response(resp, service)
     return resp.json()
 
 
@@ -386,19 +460,31 @@ async def _enrich(identifiers: list[str], limit: int = 25) -> list[dict[str, Any
         return []
     try:
         return await _fetch_entry_summaries(entry_ids)
-    except (httpx.HTTPError, RuntimeError) as exc:
+    except (httpx.HTTPError, ValueError, RuntimeError) as exc:
         # Enrichment is best-effort: never fail the search because of it.
         return [{"id": pid, "error": str(exc)} for pid in entry_ids]
 
 
 def _format(
-    raw: dict[str, Any], enriched: list[dict[str, Any]] | None, body: dict[str, Any] | None = None
+    raw: dict[str, Any],
+    enriched: list[dict[str, Any]] | None,
+    body: dict[str, Any] | None = None,
+    offset: int | None = None,
 ) -> dict[str, Any]:
     hits = [
         {"id": r["identifier"], "score": round(r.get("score", 0.0), 3)}
         for r in raw.get("result_set", [])
     ]
-    result = {"total_count": raw.get("total_count", 0), "returned": len(hits), "hits": hits}
+    total = raw.get("total_count", 0)
+    result: dict[str, Any] = {"total_count": total, "returned": len(hits)}
+    if offset is not None:
+        # Paging metadata: a single typed-search page is capped at 100 hits, so
+        # callers step `offset` forward by `next_offset` to fetch the next page.
+        has_more = offset + len(hits) < total
+        result["offset"] = offset
+        result["has_more"] = has_more
+        result["next_offset"] = offset + len(hits) if has_more else None
+    result["hits"] = hits
     if enriched is not None:
         result["details"] = enriched
     if body is not None:
@@ -439,7 +525,7 @@ async def _annotation_pdb_count(attribute: str, value: str) -> int | None:
     try:
         raw = await _post_search(body)
         return raw.get("total_count", 0)
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError, RuntimeError):
         return None
 
 
@@ -457,11 +543,12 @@ def _resolver_fallback_note(items: list[dict[str, Any]], label: str) -> str | No
 # --------------------------------------------------------------------------- #
 # Tools
 # --------------------------------------------------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_fulltext(
     query: str,
     return_type: str = "entry",
     limit: int = 10,
+    offset: int = 0,
     include_computed_models: bool = False,
     enrich: bool = True,
     group_by_identity: int | None = None,
@@ -498,6 +585,9 @@ async def search_fulltext(
             non_polymer_entity, polymer_instance, assembly, mol_definition (see the
             "Return types and fetching details" note in the server instructions).
         limit: Max number of hits to return (1-100).
+        offset: Number of hits to skip, for paging (default 0). The response's
+            next_offset/has_more report whether more pages remain; pass next_offset
+            back here with the same query to fetch the next page.
         include_computed_models: Also search computed structure models (AlphaFold etc.).
         enrich: If true, attach title/method/resolution for each entry hit.
         group_by_identity: If set (100/95/90/70/50/30), collapse redundant hits into
@@ -515,11 +605,13 @@ async def search_fulltext(
             initial_release_date + "desc" keeps the most recent.
     """
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     return_type = "polymer_entity" if (group_by_identity or group_by_uniprot) else return_type
     body = queries.build_fulltext_query(
         query,
         return_type=return_type,
         rows=limit,
+        start=offset,
         include_computed=include_computed_models,
         group_by_identity=group_by_identity,
         group_by_uniprot=group_by_uniprot,
@@ -529,9 +621,9 @@ async def search_fulltext(
     raw = await _post_search(body)
     ids = [r["identifier"] for r in raw.get("result_set", [])]
     enriched = await _enrich(ids) if (enrich and return_type == "entry" and ids) else None
-    return _format(raw, enriched, body)
+    return _format(raw, enriched, body, offset)
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_pdb_search_attributes(
     query: str | None = None, schema: str = "structure"
 ) -> list[dict[str, Any]]:
@@ -576,7 +668,7 @@ async def list_pdb_search_attributes(
     ]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def find_go_terms(
     query: str,
     namespace: str | None = None,
@@ -625,12 +717,10 @@ async def find_go_terms(
     limit = max(1, min(limit, 25))
     # Over-fetch when filtering by aspect so the post-filter still fills `limit`.
     fetch = min(limit * 5, 50) if aspect else limit
-    async with httpx.AsyncClient(
-        timeout=TIMEOUT, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
-    ) as client:
-        resp = await client.get(QUICKGO_SEARCH_URL, params={"query": query, "limit": fetch, "page": 1})
-    resp.raise_for_status()
-    results = resp.json().get("results") or []
+    data = await _get_json(
+        QUICKGO_SEARCH_URL, {"query": query, "limit": fetch, "page": 1}, "EBI QuickGO (GO)"
+    )
+    results = data.get("results") or []
     terms: list[dict[str, Any]] = []
     for r in results:
         if r.get("isObsolete"):
@@ -654,7 +744,7 @@ async def find_go_terms(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def find_interpro_domains(
     query: str,
     entry_type: str | None = None,
@@ -695,12 +785,8 @@ async def find_interpro_domains(
     params: dict[str, Any] = {"search": query, "page_size": limit}
     if etype:
         params["type"] = etype
-    async with httpx.AsyncClient(
-        timeout=TIMEOUT, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
-    ) as client:
-        resp = await client.get(INTERPRO_SEARCH_URL, params=params)
-    resp.raise_for_status()
-    results = resp.json().get("results") or []
+    data = await _get_json(INTERPRO_SEARCH_URL, params, "EBI InterPro")
+    results = data.get("results") or []
     entries: list[dict[str, Any]] = []
     for r in results:
         meta = r.get("metadata") or {}
@@ -721,7 +807,7 @@ async def find_interpro_domains(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def find_enzyme_classes(
     query: str,
     limit: int = 10,
@@ -753,15 +839,13 @@ async def find_enzyme_classes(
     limit = max(1, min(limit, 25))
     # Over-fetch a little so dropping transferred/deleted entries still fills `limit`.
     fetch = min(limit + 5, 30)
-    async with httpx.AsyncClient(
-        timeout=TIMEOUT, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
-    ) as client:
-        resp = await client.get(
-            INTENZ_SEARCH_URL, params={"query": query, "format": "json", "size": fetch, "fields": "name"}
-        )
-    resp.raise_for_status()
+    data = await _get_json(
+        INTENZ_SEARCH_URL,
+        {"query": query, "format": "json", "size": fetch, "fields": "name"},
+        "EBI Search (IntEnz)",
+    )
     enzymes: list[dict[str, Any]] = []
-    for e in resp.json().get("entries") or []:
+    for e in data.get("entries") or []:
         names = (e.get("fields") or {}).get("name") or []
         name = names[0] if names else None
         if name and name.lower().startswith(("transferred entry", "deleted entry")):
@@ -783,7 +867,7 @@ async def find_enzyme_classes(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def find_disease_terms(
     query: str,
     limit: int = 10,
@@ -817,16 +901,12 @@ async def find_disease_terms(
     limit = max(1, min(limit, 25))
     # Over-fetch so de-duplication and obsolete-filtering still fill `limit`.
     fetch = min(limit * 3, 50)
-    async with httpx.AsyncClient(
-        timeout=TIMEOUT, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
-    ) as client:
-        resp = await client.get(
-            OLS_SEARCH_URL,
-            params={"q": query, "ontology": "mondo", "rows": fetch,
-                    "fieldList": "obo_id,label,is_obsolete"},
-        )
-    resp.raise_for_status()
-    docs = ((resp.json().get("response") or {}).get("docs")) or []
+    data = await _get_json(
+        OLS_SEARCH_URL,
+        {"q": query, "ontology": "mondo", "rows": fetch, "fieldList": "obo_id,label,is_obsolete"},
+        "EBI OLS (MONDO)",
+    )
+    docs = ((data.get("response") or {}).get("docs")) or []
     diseases: list[dict[str, Any]] = []
     seen: set[str] = set()
     for d in docs:
@@ -851,13 +931,14 @@ async def find_disease_terms(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_by_attribute(
     attribute: str,
     operator: str,
     value: str | int | float | list | dict | None = None,
     return_type: str = "entry",
     limit: int = 10,
+    offset: int = 0,
     enrich: bool = True,
     negation: bool = False,
     case_sensitive: bool = False,
@@ -907,6 +988,8 @@ async def search_by_attribute(
             server instructions). E.g. return_type="entry" with a ligand attribute
             finds the structures that contain it.
         limit: Max hits (1-100).
+        offset: Number of hits to skip, for paging (default 0); pass the response's
+            next_offset back with the same query to fetch the next page.
         enrich: Attach entry metadata when return_type is "entry".
         negation: Invert the match (e.g. "not Homo sapiens").
         case_sensitive: Match the value case-sensitively (default insensitive).
@@ -926,6 +1009,7 @@ async def search_by_attribute(
             Switches to the text_chem service; usually pair with return_type="mol_definition".
     """
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     return_type = "polymer_entity" if (group_by_identity or group_by_uniprot) else return_type
     body = queries.build_attribute_query(
         attribute,
@@ -933,6 +1017,7 @@ async def search_by_attribute(
         value,
         return_type=return_type,
         rows=limit,
+        start=offset,
         negation=negation,
         case_sensitive=case_sensitive,
         group_by_identity=group_by_identity,
@@ -944,16 +1029,17 @@ async def search_by_attribute(
     raw = await _post_search(body)
     ids = [r["identifier"] for r in raw.get("result_set", [])]
     enriched = await _enrich(ids) if (enrich and return_type == "entry" and ids) else None
-    return _format(raw, enriched, body)
+    return _format(raw, enriched, body, offset)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_combined(
     full_text: str | None = None,
     filters: list[dict[str, Any]] | None = None,
     logical_operator: str = "and",
     return_type: str = "entry",
     limit: int = 10,
+    offset: int = 0,
     enrich: bool = True,
     sort_by: str | None = None,
     sort_direction: str = "asc",
@@ -998,6 +1084,8 @@ async def search_combined(
             non_polymer_entity, polymer_instance, assembly, mol_definition (see the
             server instructions).
         limit: Max hits (1-100).
+        offset: Number of hits to skip, for paging (default 0); pass the response's
+            next_offset back with the same query to fetch the next page.
         enrich: Attach title/method/resolution for each entry hit (return_type="entry" only).
         sort_by: Attribute to sort by, e.g. "rcsb_entry_info.resolution_combined".
             Omit to sort by relevance score.
@@ -1018,6 +1106,7 @@ async def search_combined(
             text_chem service. The full_text term always uses full-text search.
     """
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     return_type = "polymer_entity" if (group_by_identity or group_by_uniprot) else return_type
     body = queries.build_combined_query(
         full_text=full_text,
@@ -1025,6 +1114,7 @@ async def search_combined(
         logical_operator=logical_operator,
         return_type=return_type,
         rows=limit,
+        start=offset,
         sort_by=sort_by,
         sort_direction=sort_direction,
         group_by_identity=group_by_identity,
@@ -1036,16 +1126,17 @@ async def search_combined(
     raw = await _post_search(body)
     ids = [r["identifier"] for r in raw.get("result_set", [])]
     enriched = await _enrich(ids) if (enrich and return_type == "entry" and ids) else None
-    return _format(raw, enriched, body)
+    return _format(raw, enriched, body, offset)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_by_sequence(
     sequence: str,
     sequence_type: str = "protein",
     identity_cutoff: float = 0.3,
     evalue_cutoff: float = 1.0,
     limit: int = 10,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Find PDB polymer entities similar to a given sequence (MMseqs2, BLAST-like).
 
@@ -1056,20 +1147,24 @@ async def search_by_sequence(
         evalue_cutoff: Maximum E-value to report.
         limit: Max hits (1-100). Returns polymer_entity IDs like "4HHB_1" — fetch their
             details with get_polymer_entities.
+        offset: Number of hits to skip, for paging (default 0); pass the response's
+            next_offset back with the same query to fetch the next page.
     """
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     body = queries.build_sequence_query(
         sequence,
         sequence_type=sequence_type,
         identity_cutoff=identity_cutoff,
         evalue_cutoff=evalue_cutoff,
         rows=limit,
+        start=offset,
     )
     raw = await _post_search(body)
-    return _format(raw, None, body)
+    return _format(raw, None, body, offset)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_by_chemical(
     value: str,
     query_type: str = "descriptor",
@@ -1078,6 +1173,7 @@ async def search_by_chemical(
     match_subset: bool = False,
     return_type: str = "mol_definition",
     limit: int = 10,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Search PDB chemical components by structure (SMILES/InChI) or formula.
 
@@ -1097,8 +1193,11 @@ async def search_by_chemical(
             Use return_type="entry" to instead get the PDB structures that contain a
             matching component. Other types from the server instructions also apply.
         limit: Max hits (1-100).
+        offset: Number of hits to skip, for paging (default 0); pass the response's
+            next_offset back with the same query to fetch the next page.
     """
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     body = queries.build_chemical_query(
         value,
         query_type=query_type,
@@ -1107,18 +1206,20 @@ async def search_by_chemical(
         match_subset=match_subset,
         return_type=return_type,
         rows=limit,
+        start=offset,
     )
     raw = await _post_search(body)
-    return _format(raw, None, body)
+    return _format(raw, None, body, offset)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_by_structure(
     entry_id: str,
     assembly_id: str | None = None,
     asym_id: str | None = None,
     return_type: str | None = None,
     limit: int = 10,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Find structures with a similar 3D shape to a reference PDB structure.
 
@@ -1132,26 +1233,31 @@ async def search_by_structure(
             "polymer_instance" for a chain reference. May be overridden with any of the
             six types (see server instructions).
         limit: Max hits (1-100).
+        offset: Number of hits to skip, for paging (default 0); pass the response's
+            next_offset back with the same query to fetch the next page.
     """
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     body = queries.build_structure_query(
         entry_id,
         assembly_id=assembly_id,
         asym_id=asym_id,
         return_type=return_type,
         rows=limit,
+        start=offset,
     )
     raw = await _post_search(body)
-    return _format(raw, None, body)
+    return _format(raw, None, body, offset)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_by_seqmotif(
     pattern: str,
     pattern_type: str = "prosite",
     sequence_type: str = "protein",
     return_type: str = "polymer_entity",
     limit: int = 10,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Find polymers containing a short sequence motif (PROSITE / regex / simple).
 
@@ -1163,20 +1269,24 @@ async def search_by_seqmotif(
         return_type: What to return (default "polymer_entity"); one of the six types
             (see server instructions). Default hits feed get_polymer_entities.
         limit: Max hits (1-100).
+        offset: Number of hits to skip, for paging (default 0); pass the response's
+            next_offset back with the same query to fetch the next page.
     """
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     body = queries.build_seqmotif_query(
         pattern,
         pattern_type=pattern_type,
         sequence_type=sequence_type,
         return_type=return_type,
         rows=limit,
+        start=offset,
     )
     raw = await _post_search(body)
-    return _format(raw, None, body)
+    return _format(raw, None, body, offset)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
     """Run a raw RCSB Search API query body (escape hatch).
 
@@ -1208,7 +1318,7 @@ async def search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
     return _format(raw, None, query_body)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_count(
     full_text: str | None = None,
     filters: list[dict[str, Any]] | None = None,
@@ -1250,7 +1360,7 @@ async def search_count(
     return {"total_count": raw.get("total_count", 0), "query_editor_url": _search_editor_url(body)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_facets(
     facets: list[dict[str, Any]],
     full_text: str | None = None,
@@ -1315,7 +1425,7 @@ async def search_facets(
     return _format_facets(raw, body)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def search_strucmotif(
     entry_id: str,
     residue_ids: list[dict[str, Any]],
@@ -1327,6 +1437,7 @@ async def search_strucmotif(
     motif_pruning_strategy: str = "KRUSKAL",
     return_type: str = "polymer_entity",
     limit: int = 10,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Find structures containing a 3D STRUCTURAL MOTIF — a geometric arrangement of
     specific residues — like the one in a reference structure.
@@ -1356,8 +1467,11 @@ async def search_strucmotif(
         return_type: What to return (default "polymer_entity"); one of the six types
             (see server instructions).
         limit: Max hits (1-100).
+        offset: Number of hits to skip, for paging (default 0); pass the response's
+            next_offset back with the same query to fetch the next page.
     """
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     body = queries.build_strucmotif_query(
         entry_id,
         residue_ids,
@@ -1369,9 +1483,10 @@ async def search_strucmotif(
         motif_pruning_strategy=motif_pruning_strategy,
         return_type=return_type,
         rows=limit,
+        start=offset,
     )
     raw = await _post_search(body)
-    return _format(raw, None, body)
+    return _format(raw, None, body, offset)
 
 
 # --------------------------------------------------------------------------- #
@@ -1380,7 +1495,7 @@ async def search_strucmotif(
 # selected GraphQL node(s); pass `fields` to override the curated default
 # selection with your own GraphQL sub-selection (omit the surrounding braces).
 # --------------------------------------------------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def describe_data_object(
     object_key: str, into: str | None = None, query: str | None = None
 ) -> dict[str, Any]:
@@ -1422,7 +1537,7 @@ async def describe_data_object(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_entries(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch metadata for one or more PDB entries (title, method, resolution, size,
     dates, primary citation, and publication abstract).
@@ -1441,7 +1556,7 @@ async def get_entries(entry_ids: list[str], fields: str | None = None) -> dict[s
     """
     return await _query_batch("entries", entry_ids, fields)
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_entry_annotations(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch biological and functional annotations for one or more PDB entries, including Gene Ontology terms (molecular function, biological process, and cellular component), protein domain classifications, disease associations, antibody annotations, gene product information, and other biological annotations.
 
@@ -1450,7 +1565,7 @@ async def get_entry_annotations(entry_ids: list[str], fields: str | None = None)
     """
     return await _query_batch("entry_annotations", entry_ids, fields)
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_entry_exp_info(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch detailed experimental conditions and structure-determination metadata for one or more PDB entries, including sample temperature, pH, pressure, experimental method, diffraction data, and other reported experimental parameters.
 
@@ -1460,7 +1575,7 @@ async def get_entry_exp_info(entry_ids: list[str], fields: str | None = None) ->
     return await _query_batch("entry_exp_info", entry_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_polymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entities (protein/nucleic-acid molecules).
 
@@ -1471,7 +1586,7 @@ async def get_polymer_entities(entity_ids: list[str], fields: str | None = None)
     return await _query_batch("polymer_entities", entity_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_nonpolymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer (ligand/cofactor) entities, e.g. ["4HHB_3"].
 
@@ -1481,31 +1596,31 @@ async def get_nonpolymer_entities(entity_ids: list[str], fields: str | None = No
     return await _query_batch("nonpolymer_entities", entity_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_branched_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch branched (carbohydrate / oligosaccharide) entities, e.g. ["5FMB_2"]."""
     return await _query_batch("branched_entities", entity_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_polymer_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entity instances (individual chains), e.g. ["4HHB.A"] (entry.asym_id)."""
     return await _query_batch("polymer_entity_instances", instance_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_nonpolymer_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer entity instances (individual bound ligands), e.g. ["4HHB.E"]."""
     return await _query_batch("nonpolymer_entity_instances", instance_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_branched_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch branched entity instances (individual glycan chains), e.g. ["5FMB.C"]."""
     return await _query_batch("branched_entity_instances", instance_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_assemblies(assembly_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch biological assemblies, e.g. ["4HHB-1"] (entry-assembly).
 
@@ -1514,7 +1629,7 @@ async def get_assemblies(assembly_ids: list[str], fields: str | None = None) -> 
     return await _query_batch("assemblies", assembly_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_interfaces(interface_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch assembly interfaces, e.g. ["1BMV-1.1"] (entry-assembly.interface).
 
@@ -1523,7 +1638,7 @@ async def get_interfaces(interface_ids: list[str], fields: str | None = None) ->
     return await _query_batch("interfaces", interface_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_chem_comps(comp_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch chemical components / ligands by their short codes, e.g. ["HEM", "ATP"].
 
@@ -1532,25 +1647,25 @@ async def get_chem_comps(comp_ids: list[str], fields: str | None = None) -> dict
     return await _query_batch("chem_comps", comp_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_entry_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch entry groups (clusters of related entries) by group ID."""
     return await _query_batch("entry_groups", group_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_polymer_entity_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entity groups (e.g. sequence clusters), e.g. ["85_70"]."""
     return await _query_batch("polymer_entity_groups", group_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_nonpolymer_entity_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer entity groups (clusters of related ligands) by group ID."""
     return await _query_batch("nonpolymer_entity_groups", group_ids, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_uniprot(uniprot_id: str, fields: str | None = None) -> dict[str, Any]:
     """Fetch the UniProt record RCSB maps to an accession, e.g. "P69905".
 
@@ -1559,7 +1674,7 @@ async def get_uniprot(uniprot_id: str, fields: str | None = None) -> dict[str, A
     return await _query_single("uniprot", uniprot_id, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_pubmed(pubmed_id: int, fields: str | None = None) -> dict[str, Any]:
     """Fetch the PubMed record for a citation by its integer ID, e.g. 6726807.
 
@@ -1568,13 +1683,13 @@ async def get_pubmed(pubmed_id: int, fields: str | None = None) -> dict[str, Any
     return await _query_single("pubmed", pubmed_id, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_group_provenance(group_provenance_id: str, fields: str | None = None) -> dict[str, Any]:
     """Fetch provenance/method metadata for a grouping, e.g. "provenance_sequence_identity"."""
     return await _query_single("group_provenance", group_provenance_id, fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def data_graphql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run an arbitrary GraphQL query against the RCSB Data API (escape hatch).
 
@@ -1616,7 +1731,7 @@ SEQCOORD_OBJECTS = {
 }
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def describe_seqcoord_object(
     object_key: str, into: str | None = None, query: str | None = None
 ) -> dict[str, Any]:
@@ -1653,7 +1768,7 @@ async def describe_seqcoord_object(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def seqcoord_alignments(
     query_id: str,
     from_ref: str,
@@ -1713,7 +1828,7 @@ async def seqcoord_alignments(
     return {**data, "graphiql_url": graphiql_url}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def seqcoord_annotations(
     query_id: str,
     reference: str,
@@ -1749,7 +1864,7 @@ async def seqcoord_annotations(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def seqcoord_group_alignments(
     group: str,
     group_id: str,
@@ -1775,7 +1890,7 @@ async def seqcoord_group_alignments(
     return {**data, "graphiql_url": graphiql_url}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def seqcoord_group_annotations(
     group: str,
     group_id: str,
@@ -1810,7 +1925,7 @@ async def seqcoord_group_annotations(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def seqcoord_graphql(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run an arbitrary GraphQL query against the RCSB Sequence Coordinates API.
 

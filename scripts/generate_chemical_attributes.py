@@ -10,7 +10,7 @@ Each searchable leaf carries an ``rcsb_search_context`` array; the supported
 query operators are derived from that context plus the value type. This script
 walks the *chemical* schema and emits ``src/rcsb_mcp/chemical_search_attributes.py``
 with the same ``{attribute, type, operators, description}`` shape as the curated
-``search_attibutes.py`` (the structure catalog).
+``search_attributes.py`` (the structure catalog).
 
 The context->operators mapping is validated by ``--verify-structure``, which
 regenerates the structure catalog from the live schema and asserts it reproduces
@@ -143,7 +143,7 @@ def render_module(catalog: list[dict]) -> str:
 def verify_structure() -> int:
     """Regenerate the structure catalog and diff against the committed SEARCH_ATTRIBUTES."""
     sys.path.insert(0, str(OUT_PATH.parents[1]))
-    from rcsb_mcp.search_attibutes import SEARCH_ATTRIBUTES as committed
+    from rcsb_mcp.search_attributes import SEARCH_ATTRIBUTES as committed
 
     derived = {a["attribute"]: a for a in build_catalog(fetch_schema(STRUCTURE_SCHEMA_URL))}
     existing = {a["attribute"]: a for a in committed}
