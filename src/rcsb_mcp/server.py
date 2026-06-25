@@ -629,6 +629,12 @@ async def rcsb_search_fulltext(
     If a resolver finds no usable match (count 0, or all pdb_entry_count 0), the concept isn't
     covered by that ontology — THEN fall back to a keyword search here for the concept.
 
+    Matching spans ALL text annotations, so a hit may be a spurious keyword match rather than a
+    real answer. After searching, JUDGE each hit's relevance yourself: read its title (in
+    `details` when enrich=True) and, for borderline cases, fetch its PubMed abstract
+    (rcsb_get_entries -> pubmed.rcsb_pubmed_abstract_text); decide whether that text actually
+    supports the user's question, and treat a low `score` as only a weak hint.
+
     Args:
         query: Free-text terms matched (case-insensitively) against all text annotations.
             Quote a multi-word phrase to require the words adjacent/in order (e.g.
@@ -1208,7 +1214,9 @@ async def rcsb_search_combined(
         sort_by="rcsb_entry_info.resolution_combined", sort_direction="asc"
 
     Args:
-        full_text: Optional free-text term, combined with the filters.
+        full_text: Optional free-text term, combined with the filters. Like rcsb_search_fulltext
+            this matches text annotations and can yield spurious hits — judge each result's
+            title/abstract against the user's intent before relying on it.
         filters: List of {attribute, operator, value} dicts (see rcsb_search_by_attribute
             for operators and attribute paths). Each may also carry optional
             "negation" and "case_sensitive" booleans.
