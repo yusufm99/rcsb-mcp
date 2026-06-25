@@ -625,6 +625,7 @@ async def rcsb_search_fulltext(
       - molecular function / process / location            -> rcsb_find_go_terms
       - protein domain / family / fold                     -> rcsb_find_interpro_domains
       - enzyme / catalyzed reaction                        -> rcsb_find_enzyme_classes
+      - organism common name / clade (e.g. "human", "mammals") -> rcsb_find_organisms
     Each returns ids to use with rcsb_search_by_attribute on the matching annotation attribute.
     If a resolver finds no usable match (count 0, or all pdb_entry_count 0), the concept isn't
     covered by that ontology — THEN fall back to a keyword search here for the concept.
@@ -1088,9 +1089,9 @@ async def rcsb_search_by_attribute(
     the exact attribute path or its operators, call `rcsb_list_pdb_search_attributes` first.
 
     For a biological concept, resolve it to an ontology id first and filter on the matching
-    annotation attribute: disease -> rcsb_find_disease_terms (rcsb_uniprot_annotation...);
+    annotation attribute: disease -> rcsb_find_disease_terms;
     function/process/location -> rcsb_find_go_terms; domain/family/fold -> rcsb_find_interpro_domains;
-    enzyme/reaction -> rcsb_find_enzyme_classes.
+    enzyme/reaction -> rcsb_find_enzyme_classes; organism common name/clade -> rcsb_find_organisms.
     If a resolver returns no usable id, or a concept/annotation filter yields no hits, fall
     back to rcsb_search_fulltext for the concept. (For ordinary constraints — resolution, organism,
     dates — an empty result is a valid answer: report it, don't keyword-search instead.)
@@ -1200,7 +1201,7 @@ async def rcsb_search_combined(
     For a biological concept among the constraints, resolve it to an ontology id first and add
     it as an annotation filter: disease -> rcsb_find_disease_terms; function/process/location ->
     rcsb_find_go_terms; domain/family/fold -> rcsb_find_interpro_domains; enzyme/reaction ->
-    rcsb_find_enzyme_classes.
+    rcsb_find_enzyme_classes; organism common name/clade -> rcsb_find_organisms.
 
     Use this when a request combines multiple conditions, e.g.
     "human hemoglobin structures better than 2 Angstrom resolution":
