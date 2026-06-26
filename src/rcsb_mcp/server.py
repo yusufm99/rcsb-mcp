@@ -792,11 +792,11 @@ async def rcsb_search_fulltext(
             exclusive with group_by_identity.
         group_by_ranking: With group_by_identity or group_by_uniprot, which member to keep as
             each cluster's representative:
-            - resolution: rcsb_entry_info.resolution_combined
-            - released date: rcsb_accession_info.initial_release_date
-            - ElasticSearch score: score
-            - UniProt coverage: coverage — group_by_uniprot only, the most complete structure
-            per accession; ignores direction.
+            - rcsb_entry_info.resolution_combined (representative based on resolution)
+            - rcsb_accession_info.initial_release_date (representative based on released date)
+            - score (representative based on ElasticSearch score)
+            - coverage (representative based on the most complete structure compared
+              to the UniProt sequence; recommended when grouping by UniProt; ignores direction)
             - Omit for RCSB's default.
         group_by_ranking_direction: "asc" or "desc" (default "desc") for group_by_ranking —
             e.g. resolution_combined + "asc" keeps the best-resolution structure per cluster;
@@ -1289,11 +1289,11 @@ async def rcsb_search_by_attribute(
             exclusive with group_by_identity.
         group_by_ranking: With group_by_identity or group_by_uniprot, which member to keep as
             each cluster's representative:
-            - resolution: rcsb_entry_info.resolution_combined
-            - released date: rcsb_accession_info.initial_release_date
-            - ElasticSearch score: score
-            - UniProt coverage: coverage — group_by_uniprot only, the most complete structure
-            per accession; ignores direction.
+            - rcsb_entry_info.resolution_combined (representative based on resolution)
+            - rcsb_accession_info.initial_release_date (representative based on released date)
+            - score (representative based on ElasticSearch score)
+            - coverage (representative based on the most complete structure compared
+              to the UniProt sequence; recommended when grouping by UniProt; ignores direction)
             - Omit for RCSB's default.
         group_by_ranking_direction: "asc" or "desc" (default "desc") for group_by_ranking
             (e.g. resolution_combined + "asc" = best-resolution representative).
