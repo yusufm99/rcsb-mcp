@@ -58,8 +58,24 @@ CHEMICAL_MATCH_TYPES = {
 # Seqmotif pattern grammars (spec enum).
 SEQMOTIF_PATTERN_TYPES = {"simple", "prosite", "regex"}
 
-# Allowed sequence-identity cluster cutoffs for group_by (spec enum).
-GROUP_BY_IDENTITY_CUTOFFS = {100, 95, 90, 70, 50, 30}
+# group_by values -> the RCSB aggregation_method spec for collapsing redundant hits
+# into clusters (one representative each). Only valid with return_type=polymer_entity.
+GROUP_BY_METHODS: dict[str, dict[str, Any]] = {
+    "seqid_30": {"aggregation_method": "sequence_identity", "similarity_cutoff": 30},
+    "seqid_50": {"aggregation_method": "sequence_identity", "similarity_cutoff": 50},
+    "seqid_70": {"aggregation_method": "sequence_identity", "similarity_cutoff": 70},
+    "seqid_90": {"aggregation_method": "sequence_identity", "similarity_cutoff": 90},
+    "seqid_95": {"aggregation_method": "sequence_identity", "similarity_cutoff": 95},
+    "uniprot": {"aggregation_method": "matching_uniprot_accession"},
+}
+# group_by_ranking value -> (sort_by, fixed direction) choosing each cluster's
+# representative. "coverage" (uniprot grouping only) takes no direction.
+GROUP_BY_RANKING_SORTS: dict[str, tuple[str, str]] = {
+    "resolution": ("rcsb_entry_info.resolution_combined", "asc"),
+    "released_date": ("rcsb_accession_info.initial_release_date", "desc"),
+    "entity_residue_count": ("entity_poly.rcsb_sample_sequence_length", "desc"),
+    "score": ("score", "desc"),
+}
 
 # Facet (aggregation) types from the spec enum.
 FACET_AGG_TYPES = {"terms", "histogram", "date_histogram", "range", "date_range", "cardinality"}
@@ -76,16 +92,17 @@ def _request_options(
     *,
     all_hits: bool = False,
     scoring_strategy: str | None = None,
-    group_by_identity: int | None = None,
-    group_by_uniprot: bool = False,
+    group_by: str | None = None,
     group_by_ranking: str | None = None,
-    group_by_ranking_direction: str = "desc",
 ) -> dict[str, Any]:
     """Common request_options block: pagination, content type, sort, grouping.
 
     When `all_hits` is True the query returns the COMPLETE result set
-    (`return_all_hits`) and pagination is omitted; otherwise it pages with
-    start/rows.
+    (`return_all_hits`) and pagination is omitted; otherwise it pages with start/rows.
+    `group_by` (see GROUP_BY_METHODS) collapses redundant polymer_entity hits into
+    clusters and returns one representative each, chosen by `group_by_ranking` (see
+    GROUP_BY_RANKING_SORTS — each ranking has a fixed direction). Requiring
+    return_type=polymer_entity is the caller's responsibility.
     """
     content = ["experimental"]
     if include_computed:
@@ -100,39 +117,27 @@ def _request_options(
         options["paginate"] = {"start": start, "rows": rows}
     if scoring_strategy:
         options["scoring_strategy"] = scoring_strategy
-    if group_by_identity is not None and group_by_uniprot:
-        raise ValueError("set either group_by_identity or group_by_uniprot, not both")
-    grouped = group_by_identity is not None or group_by_uniprot
-    if group_by_ranking is not None and not grouped:
-        raise ValueError("group_by_ranking requires group_by_identity or group_by_uniprot")
-    # Collapse redundant hits into clusters and return one representative each.
-    group_by: dict[str, Any] | None = None
-    if group_by_identity is not None:
-        if group_by_identity not in GROUP_BY_IDENTITY_CUTOFFS:
-            raise ValueError(
-                f"group_by_identity must be one of {sorted(GROUP_BY_IDENTITY_CUTOFFS)}"
-            )
-        group_by = {"aggregation_method": "sequence_identity", "similarity_cutoff": group_by_identity}
-    elif group_by_uniprot:
-        group_by = {"aggregation_method": "matching_uniprot_accession"}
+    if group_by_ranking is not None and group_by is None:
+        raise ValueError("group_by_ranking requires group_by")
     if group_by is not None:
-        # ranking_criteria_type chooses each cluster's representative.
+        if group_by not in GROUP_BY_METHODS:
+            raise ValueError(f"group_by must be one of {sorted(GROUP_BY_METHODS)}")
+        gb: dict[str, Any] = dict(GROUP_BY_METHODS[group_by])
         if group_by_ranking == "coverage":
             # UniProt-only ranking: keep the candidate covering the most of the UniProt
-            # sequence. It takes NO direction (the API rejects extra keys).
-            if not group_by_uniprot:
-                raise ValueError('group_by_ranking="coverage" is only valid with group_by_uniprot')
-            group_by["ranking_criteria_type"] = {"sort_by": "coverage"}
-        elif group_by_ranking:
-            # Sort-attribute ranking; the API requires a direction, so always emit one
-            # (default "desc" = RCSB's own default representative).
-            if group_by_ranking_direction not in {"asc", "desc"}:
-                raise ValueError('group_by_ranking_direction must be "asc" or "desc"')
-            group_by["ranking_criteria_type"] = {
-                "sort_by": group_by_ranking,
-                "direction": group_by_ranking_direction,
-            }
-        options["group_by"] = group_by
+            # sequence. Takes NO direction (the API rejects extra keys).
+            if group_by != "uniprot":
+                raise ValueError('group_by_ranking="coverage" requires group_by="uniprot"')
+            gb["ranking_criteria_type"] = {"sort_by": "coverage"}
+        elif group_by_ranking is not None:
+            if group_by_ranking not in GROUP_BY_RANKING_SORTS:
+                raise ValueError(
+                    "group_by_ranking must be one of "
+                    f"{sorted(GROUP_BY_RANKING_SORTS) + ['coverage']}"
+                )
+            sort_by, direction = GROUP_BY_RANKING_SORTS[group_by_ranking]
+            gb["ranking_criteria_type"] = {"sort_by": sort_by, "direction": direction}
+        options["group_by"] = gb
         options["group_by_return_type"] = "representatives"
     return options
 
@@ -276,86 +281,6 @@ def _search_node(
     return {"type": "group", "logical_operator": logical_operator, "nodes": nodes}
 
 
-def build_fulltext_query(
-    value: str,
-    return_type: str = "entry",
-    rows: int = 10,
-    start: int = 0,
-    include_computed: bool = False,
-    all_hits: bool = False,
-    group_by_identity: int | None = None,
-    group_by_uniprot: bool = False,
-    group_by_ranking: str | None = None,
-    group_by_ranking_direction: str = "desc",
-) -> dict[str, Any]:
-    """Unstructured keyword/full-text search across all annotations."""
-    if return_type not in RETURN_TYPES:
-        raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    return {
-        "query": {
-            "type": "terminal",
-            "service": "full_text",
-            "parameters": {"value": value},
-        },
-        "return_type": return_type,
-        "request_options": _request_options(
-            start, rows, include_computed,
-            all_hits=all_hits,
-            group_by_identity=group_by_identity,
-            group_by_uniprot=group_by_uniprot,
-            group_by_ranking=group_by_ranking,
-            group_by_ranking_direction=group_by_ranking_direction,
-        ),
-    }
-
-
-def build_attribute_query(
-    attribute: str,
-    operator: str,
-    value: Any = None,
-    return_type: str = "entry",
-    rows: int = 10,
-    start: int = 0,
-    include_computed: bool = False,
-    all_hits: bool = False,
-    negation: bool = False,
-    case_sensitive: bool = False,
-    group_by_identity: int | None = None,
-    group_by_uniprot: bool = False,
-    group_by_ranking: str | None = None,
-    group_by_ranking_direction: str = "desc",
-    chemical: bool = False,
-) -> dict[str, Any]:
-    """Structured search against a specific indexed attribute.
-
-    Example: attribute="rcsb_entry_info.resolution_combined",
-             operator="less", value=2.0
-
-    The "exists" operator takes no value. `negation` inverts the match;
-    `case_sensitive` forces case-sensitive value comparison. Set `chemical=True`
-    for chemical-component attributes (the "text_chem" service); structure
-    attributes use the default "text" service.
-    """
-    if return_type not in RETURN_TYPES:
-        raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    return {
-        "query": _text_node(
-            attribute, operator, value,
-            service="text_chem" if chemical else "text",
-            negation=negation, case_sensitive=case_sensitive,
-        ),
-        "return_type": return_type,
-        "request_options": _request_options(
-            start, rows, include_computed,
-            all_hits=all_hits,
-            group_by_identity=group_by_identity,
-            group_by_uniprot=group_by_uniprot,
-            group_by_ranking=group_by_ranking,
-            group_by_ranking_direction=group_by_ranking_direction,
-        ),
-    }
-
-
 def _combine_service(
     service_node: dict[str, Any],
     attributes: list[dict[str, Any]] | None,
@@ -405,18 +330,16 @@ def build_combined_query(
     all_hits: bool = False,
     sort_by: str | None = None,
     sort_direction: str = "asc",
-    group_by_identity: int | None = None,
-    group_by_uniprot: bool = False,
+    group_by: str | None = None,
     group_by_ranking: str | None = None,
-    group_by_ranking_direction: str = "desc",
     chemical: bool = False,
     facets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Combine a full-text term and/or several attribute filters with AND/OR.
 
-    Each filter is a dict {"attribute", "operator", "value"} (same shape as
-    build_attribute_query) and may also carry optional "negation" and
-    "case_sensitive" booleans. A single condition collapses to a plain terminal
+    Each filter is a dict {"attribute", "operator", "value"} and may also carry
+    optional "negation" and "case_sensitive" booleans. A single condition
+    (one full_text term or one filter) collapses to a plain terminal
     node; multiple conditions are wrapped in a "group" node. Set `chemical=True`
     when the filters target chemical-component attributes (the "text_chem"
     service); the full-text term always uses the "full_text" service.
@@ -435,6 +358,8 @@ def build_combined_query(
     """
     if return_type not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
+    if group_by is not None and return_type != "polymer_entity":
+        raise ValueError("group_by is only available with return_type='polymer_entity'")
 
     query = _search_node(
         full_text, filters, logical_operator,
@@ -447,10 +372,8 @@ def build_combined_query(
         options = _request_options(
             start, rows, include_computed,
             all_hits=all_hits,
-            group_by_identity=group_by_identity,
-            group_by_uniprot=group_by_uniprot,
+            group_by=group_by,
             group_by_ranking=group_by_ranking,
-            group_by_ranking_direction=group_by_ranking_direction,
         )
         if sort_by:
             if sort_direction not in {"asc", "desc"}:

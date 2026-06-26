@@ -81,7 +81,10 @@ AtomPairingScheme = Literal["ALL", "BACKBONE", "SIDE_CHAIN", "PSEUDO_ATOMS"]
 MotifPruningStrategy = Literal["NONE", "KRUSKAL"]
 LogicalOperator = Literal["and", "or"]
 SortDirection = Literal["asc", "desc"]
-GroupByIdentity = Literal[100, 95, 90, 70, 50, 30]
+GroupBy = Literal["seqid_30", "seqid_50", "seqid_70", "seqid_90", "seqid_95", "uniprot"]
+GroupByRanking = Literal[
+    "resolution", "released_date", "entity_residue_count", "score", "coverage",
+]
 AttributeSchema = Literal["structure", "chemical"]
 SequenceRef = Literal["NCBI_GENOME", "NCBI_PROTEIN", "PDB_ENTITY", "PDB_INSTANCE", "UNIPROT"]
 GroupRef = Literal["MATCHING_UNIPROT_ACCESSION", "SEQUENCE_IDENTITY"]
@@ -712,10 +715,8 @@ async def rcsb_search_fulltext(
     facets: list[dict[str, Any]] | None = None,
     sort_by: str | None = None,
     sort_direction: SortDirection = "asc",
-    group_by_identity: GroupByIdentity | None = None,
-    group_by_uniprot: bool = False,
-    group_by_ranking: str | None = None,
-    group_by_ranking_direction: SortDirection = "desc",
+    group_by: GroupBy | None = None,
+    group_by_ranking: GroupByRanking | None = None,
 ) -> dict[str, Any]:
     """Search the PDB by free-text keywords (e.g. "CRISPR Cas9", "hemoglobin"), optionally
     refined with structured attribute filters.
@@ -784,23 +785,15 @@ async def rcsb_search_fulltext(
         sort_by: Attribute path to sort by (e.g. "rcsb_entry_info.resolution_combined");
             omit to sort by relevance score.
         sort_direction: "asc" (default) or "desc" for sort_by.
-        group_by_identity: If set (100/95/90/70/50/30), collapse redundant hits into
-            sequence-identity clusters and return one representative each; forces
-            return_type to "polymer_entity".
-        group_by_uniprot: If True, collapse hits to one representative per UniProt accession
-            (non-redundant by protein); forces return_type to "polymer_entity". Mutually
-            exclusive with group_by_identity.
-        group_by_ranking: With group_by_identity or group_by_uniprot, which member to keep as
-            each cluster's representative:
-            - rcsb_entry_info.resolution_combined (representative based on resolution)
-            - rcsb_accession_info.initial_release_date (representative based on released date)
-            - score (representative based on ElasticSearch score)
-            - coverage (representative based on the most complete structure compared
-              to the UniProt sequence; recommended when grouping by UniProt; ignores direction)
-            - Omit for RCSB's default.
-        group_by_ranking_direction: "asc" or "desc" (default "desc") for group_by_ranking —
-            e.g. resolution_combined + "asc" keeps the best-resolution structure per cluster;
-            initial_release_date + "desc" keeps the most recent.
+        group_by: Collapse redundant polymer_entity hits into clusters, returning one
+            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
+            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
+            Only available with return_type="polymer_entity".
+        group_by_ranking: Which member to keep as each cluster's representative (each ranking
+            has a fixed direction): "resolution" (best first), "released_date" (most recent),
+            "entity_residue_count" (longest), "score" (most relevant), or "coverage" (most
+            complete vs. the UniProt sequence — requires group_by="uniprot"). Omit for RCSB's
+            default.
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -808,7 +801,6 @@ async def rcsb_search_fulltext(
         With all_hits, the offset/has_more/next_offset paging fields are omitted. With `facets`,
         instead returns {total_count, facets, query_editor_url}.
     """
-    return_type = "polymer_entity" if (group_by_identity or group_by_uniprot) else return_type
     body = queries.build_combined_query(
         full_text=query,
         filters=_filter_dicts(attributes),
@@ -820,10 +812,8 @@ async def rcsb_search_fulltext(
         include_computed=include_computed_models,
         sort_by=sort_by,
         sort_direction=sort_direction,
-        group_by_identity=group_by_identity,
-        group_by_uniprot=group_by_uniprot,
+        group_by=group_by,
         group_by_ranking=group_by_ranking,
-        group_by_ranking_direction=group_by_ranking_direction,
         chemical=chemical,
         facets=facets,
     )
@@ -1225,10 +1215,8 @@ async def rcsb_search_by_attribute(
     offset: Offset = 0,
     all_hits: bool = False,
     enrich: bool = True,
-    group_by_identity: GroupByIdentity | None = None,
-    group_by_uniprot: bool = False,
-    group_by_ranking: str | None = None,
-    group_by_ranking_direction: SortDirection = "desc",
+    group_by: GroupBy | None = None,
+    group_by_ranking: GroupByRanking | None = None,
     chemical: bool = False,
     facets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -1282,21 +1270,15 @@ async def rcsb_search_by_attribute(
             narrow the query, aggregate by passing `facets`, or page instead. enrich
             still annotates only the first 25 hits.
         enrich: Attach entry metadata when return_type is "entry".
-        group_by_identity: If set (100/95/90/70/50/30), return one representative per
-            sequence-identity cluster; forces return_type to "polymer_entity".
-        group_by_uniprot: If True, return one representative per UniProt accession
-            (non-redundant by protein); forces return_type to "polymer_entity". Mutually
-            exclusive with group_by_identity.
-        group_by_ranking: With group_by_identity or group_by_uniprot, which member to keep as
-            each cluster's representative:
-            - rcsb_entry_info.resolution_combined (representative based on resolution)
-            - rcsb_accession_info.initial_release_date (representative based on released date)
-            - score (representative based on ElasticSearch score)
-            - coverage (representative based on the most complete structure compared
-              to the UniProt sequence; recommended when grouping by UniProt; ignores direction)
-            - Omit for RCSB's default.
-        group_by_ranking_direction: "asc" or "desc" (default "desc") for group_by_ranking
-            (e.g. resolution_combined + "asc" = best-resolution representative).
+        group_by: Collapse redundant polymer_entity hits into clusters, returning one
+            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
+            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
+            Only available with return_type="polymer_entity".
+        group_by_ranking: Which member to keep as each cluster's representative (each ranking
+            has a fixed direction): "resolution" (best first), "released_date" (most recent),
+            "entity_residue_count" (longest), "score" (most relevant), or "coverage" (most
+            complete vs. the UniProt sequence — requires group_by="uniprot"). Omit for RCSB's
+            default.
         chemical: Set True for chemical-component attributes (paths from
             rcsb_list_pdb_search_attributes(schema="chemical"), e.g. "chem_comp.formula_weight").
             Switches to the text_chem service; usually pair with return_type="mol_definition".
@@ -1309,7 +1291,6 @@ async def rcsb_search_by_attribute(
         With all_hits, the offset/has_more/next_offset paging fields are omitted. With `facets`,
         instead returns {total_count, facets, query_editor_url}.
     """
-    return_type = "polymer_entity" if (group_by_identity or group_by_uniprot) else return_type
     body = queries.build_combined_query(
         full_text=None,
         filters=_filter_dicts(attributes),
@@ -1318,10 +1299,8 @@ async def rcsb_search_by_attribute(
         rows=limit,
         start=offset,
         all_hits=all_hits,
-        group_by_identity=group_by_identity,
-        group_by_uniprot=group_by_uniprot,
+        group_by=group_by,
         group_by_ranking=group_by_ranking,
-        group_by_ranking_direction=group_by_ranking_direction,
         chemical=chemical,
         facets=facets,
     )

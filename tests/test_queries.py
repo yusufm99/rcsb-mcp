@@ -7,8 +7,26 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from rcsb_mcp import queries  # noqa: E402
 
 
+# build_combined_query is the single production search builder; these thin adapters keep the
+# single-condition tests readable (the old build_fulltext_query / build_attribute_query wrappers
+# were removed once both tools routed through build_combined_query).
+def _ft(value, **kw):
+    return queries.build_combined_query(full_text=value, **kw)
+
+
+def _attr(attribute, operator, value=None, *, negation=False, case_sensitive=False, **kw):
+    f = {"attribute": attribute, "operator": operator}
+    if operator != "exists":
+        f["value"] = value
+    if negation:
+        f["negation"] = True
+    if case_sensitive:
+        f["case_sensitive"] = True
+    return queries.build_combined_query(filters=[f], **kw)
+
+
 def test_fulltext():
-    q = queries.build_fulltext_query("hemoglobin", rows=5)
+    q = _ft("hemoglobin", rows=5)
     assert q["query"]["service"] == "full_text"
     assert q["query"]["parameters"]["value"] == "hemoglobin"
     assert q["return_type"] == "entry"
@@ -18,13 +36,13 @@ def test_fulltext():
 
 
 def test_fulltext_with_computed():
-    q = queries.build_fulltext_query("kinase", include_computed=True)
+    q = _ft("kinase", include_computed=True)
     assert q["request_options"]["results_content_type"] == ["experimental", "computational"]
     print("ok: fulltext computed")
 
 
 def test_attribute():
-    q = queries.build_attribute_query(
+    q = _attr(
         "rcsb_entry_info.resolution_combined", "less", 2.0
     )
     p = q["query"]["parameters"]
@@ -80,8 +98,8 @@ def test_all_hits():
     # all_hits=True swaps paginate for return_all_hits across the text builders;
     # the default keeps paginate.
     for build in (
-        lambda **k: queries.build_fulltext_query("baseplate", **k),
-        lambda **k: queries.build_attribute_query(
+        lambda **k: _ft("baseplate", **k),
+        lambda **k: _attr(
             "rcsb_entity_source_organism.ncbi_scientific_name", "exact_match",
             "Homo sapiens", **k),
         lambda **k: queries.build_combined_query(full_text="baseplate", **k),
@@ -99,7 +117,7 @@ def test_all_hits():
 
 def test_attribute_exists_and_flags():
     # "exists" carries no value; negation/case_sensitive add the right flags.
-    q = queries.build_attribute_query(
+    q = _attr(
         "rcsb_nonpolymer_entity.pdbx_description", "exists",
         negation=True, case_sensitive=True,
     )
@@ -107,7 +125,7 @@ def test_attribute_exists_and_flags():
     assert "value" not in p
     assert p["operator"] == "exists" and p["negation"] is True and p["case_sensitive"] is True
     # a normal operator keeps its value and omits the flags by default.
-    p2 = queries.build_attribute_query("a", "equals", 3)["query"]["parameters"]
+    p2 = _attr("a", "equals", 3)["query"]["parameters"]
     assert p2["value"] == 3 and "negation" not in p2 and "case_sensitive" not in p2
     print("ok: attribute exists/flags")
 
@@ -116,7 +134,7 @@ def test_value_coercion():
     # Coercion is driven by the attribute's declared TYPE (from the schema catalog),
     # not by the operator.
     def P(a, o, v):
-        return queries.build_attribute_query(a, o, v)["query"]["parameters"]
+        return _attr(a, o, v)["query"]["parameters"]
     # 'number' attribute: a numeric string becomes a float.
     pn = P("rcsb_entry_info.resolution_combined", "less", "2.0")
     assert pn["value"] == 2.0 and isinstance(pn["value"], float)
@@ -141,78 +159,73 @@ def test_value_coercion():
 
 
 def test_group_by_identity():
-    q = queries.build_fulltext_query("kinase", return_type="polymer_entity", group_by_identity=30)
+    q = _ft("kinase", return_type="polymer_entity", group_by="seqid_30")
     opts = q["request_options"]
     assert opts["group_by"] == {"aggregation_method": "sequence_identity", "similarity_cutoff": 30}
     assert opts["group_by_return_type"] == "representatives"
+    # uniprot grouping.
+    qu = queries.build_combined_query(full_text="x", return_type="polymer_entity", group_by="uniprot")
+    assert qu["request_options"]["group_by"] == {"aggregation_method": "matching_uniprot_accession"}
     # combined filters accept per-filter negation.
     q2 = queries.build_combined_query(
         filters=[{"attribute": "a", "operator": "exact_match", "value": "x", "negation": True}]
     )
     assert q2["query"]["parameters"]["negation"] is True
+    # group_by requires return_type="polymer_entity" (default is "entry").
+    try:
+        queries.build_combined_query(full_text="x", group_by="seqid_30")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for group_by without polymer_entity")
     print("ok: group_by identity")
 
 
 def test_group_by_ranking():
-    # ranking_criteria_type picks the cluster representative; direction always emitted.
-    q = queries.build_fulltext_query(
-        "kinase", return_type="polymer_entity", group_by_identity=30,
-        group_by_ranking="rcsb_entry_info.resolution_combined", group_by_ranking_direction="asc",
-    )
-    assert q["request_options"]["group_by"]["ranking_criteria_type"] == {
-        "sort_by": "rcsb_entry_info.resolution_combined", "direction": "asc",
+    # each ranking maps to a fixed (sort_by, direction).
+    cases = {
+        "resolution": ("rcsb_entry_info.resolution_combined", "asc"),
+        "released_date": ("rcsb_accession_info.initial_release_date", "desc"),
+        "entity_residue_count": ("entity_poly.rcsb_sample_sequence_length", "desc"),
+        "score": ("score", "desc"),
     }
-    # "score" is a valid sort_by; default direction is "desc".
-    q2 = queries.build_combined_query(full_text="x", group_by_identity=90, group_by_ranking="score")
-    assert q2["request_options"]["group_by"]["ranking_criteria_type"] == {
-        "sort_by": "score", "direction": "desc",
-    }
-    # no ranking -> no ranking_criteria_type key (unchanged default behavior).
-    q3 = queries.build_attribute_query("a", "exists", group_by_identity=30)
-    assert "ranking_criteria_type" not in q3["request_options"]["group_by"]
-    # ranking without group_by_identity, and bad direction, both raise.
-    for bad in (
-        lambda: queries.build_fulltext_query("x", group_by_ranking="score"),
-        lambda: queries.build_fulltext_query(
-            "x", group_by_identity=30, group_by_ranking="score", group_by_ranking_direction="up"),
-    ):
-        try:
-            bad()
-        except ValueError:
-            continue
-        raise AssertionError("expected ValueError")
+    for ranking, (sort_by, direction) in cases.items():
+        q = queries.build_combined_query(
+            full_text="kinase", return_type="polymer_entity", group_by="seqid_30",
+            group_by_ranking=ranking,
+        )
+        assert q["request_options"]["group_by"]["ranking_criteria_type"] == {
+            "sort_by": sort_by, "direction": direction,
+        }, ranking
+    # no ranking -> no ranking_criteria_type key.
+    q4 = _attr("a", "exists", return_type="polymer_entity", group_by="seqid_30")
+    assert "ranking_criteria_type" not in q4["request_options"]["group_by"]
+    # ranking without group_by raises.
+    try:
+        _ft("x", return_type="polymer_entity", group_by_ranking="score")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for ranking without group_by")
     print("ok: group_by ranking")
 
 
 def test_group_by_uniprot():
-    q = queries.build_fulltext_query("kinase", return_type="polymer_entity", group_by_uniprot=True)
+    q = _ft("kinase", return_type="polymer_entity", group_by="uniprot")
     assert q["request_options"]["group_by"] == {"aggregation_method": "matching_uniprot_accession"}
     assert q["request_options"]["group_by_return_type"] == "representatives"
-    # uniprot grouping honors ranking_criteria_type.
-    q2 = queries.build_combined_query(
-        full_text="x", group_by_uniprot=True,
-        group_by_ranking="rcsb_entry_info.resolution_combined", group_by_ranking_direction="asc",
-    )
-    assert q2["request_options"]["group_by"]["ranking_criteria_type"] == {
-        "sort_by": "rcsb_entry_info.resolution_combined", "direction": "asc",
-    }
-    # identity + uniprot together is rejected.
-    try:
-        queries.build_fulltext_query("x", group_by_identity=30, group_by_uniprot=True)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected ValueError for identity+uniprot")
     # "coverage" ranking: UniProt-only, emitted WITHOUT a direction.
-    cov = queries.build_fulltext_query("x", group_by_uniprot=True, group_by_ranking="coverage")
+    cov = _ft("x", return_type="polymer_entity", group_by="uniprot",
+                                       group_by_ranking="coverage")
     assert cov["request_options"]["group_by"]["ranking_criteria_type"] == {"sort_by": "coverage"}
-    # coverage without group_by_uniprot (e.g. with identity) is rejected.
+    # coverage with a non-uniprot grouping is rejected.
     try:
-        queries.build_fulltext_query("x", group_by_identity=30, group_by_ranking="coverage")
+        _ft("x", return_type="polymer_entity", group_by="seqid_30",
+                                     group_by_ranking="coverage")
     except ValueError:
         pass
     else:
-        raise AssertionError('expected ValueError for coverage without group_by_uniprot')
+        raise AssertionError('expected ValueError for coverage without group_by="uniprot"')
     print("ok: group_by uniprot")
 
 
@@ -317,13 +330,13 @@ def test_strucmotif():
 
 def test_chemical_attribute_service():
     # chemical=True switches the attribute terminal to the text_chem service.
-    q = queries.build_attribute_query(
+    q = _attr(
         "chem_comp.formula_weight", "less", 300, chemical=True, return_type="mol_definition"
     )
     assert q["query"]["service"] == "text_chem"
     assert q["return_type"] == "mol_definition"
     # structure attributes keep the default "text" service.
-    assert queries.build_attribute_query("a", "equals", 1)["query"]["service"] == "text"
+    assert _attr("a", "equals", 1)["query"]["service"] == "text"
     # in a combined query, filters use text_chem but the full-text term stays full_text.
     c = queries.build_combined_query(
         full_text="aspirin",
@@ -337,8 +350,8 @@ def test_chemical_attribute_service():
 
 def test_validation_errors():
     for bad in (
-        lambda: queries.build_fulltext_query("x", return_type="bogus"),
-        lambda: queries.build_attribute_query("a", "bogus_op", 1),
+        lambda: _ft("x", return_type="bogus"),
+        lambda: _attr("a", "bogus_op", 1),
         lambda: queries.build_sequence_query("x", identity_cutoff=5),
         lambda: queries.build_sequence_query("x", sequence_type="zzz"),
         lambda: queries.build_combined_query(),  # no conditions
@@ -350,7 +363,7 @@ def test_validation_errors():
         lambda: queries.build_data_query("polymer_entities", ["", "  "]),  # all blank
         lambda: queries.build_data_query("bogus_object", ["X"]),  # unknown object
         lambda: queries.build_data_query("uniprot", "  "),  # blank single id
-        lambda: queries.build_fulltext_query("x", group_by_identity=42),  # bad cutoff
+        lambda: _ft("x", return_type="polymer_entity", group_by="seqid_42"),  # bad group_by
         lambda: queries.build_chemical_query("c1ccccc1", match_type="bogus"),  # bad match
         lambda: queries.build_chemical_query("x", descriptor_type="MOL"),  # bad desc type
         lambda: queries.build_chemical_query("x", query_type="bogus"),  # bad query type
