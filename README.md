@@ -25,11 +25,8 @@ Bank structures** — discover, inspect, and cross-reference — from LLM client
 | `rcsb_find_enzyme_classes` | Resolve a free-text enzyme / reaction to Enzyme Commission (EC) numbers (via EBI Search/IntEnz), annotated with PDB entry counts — then search by `rcsb_polymer_entity.rcsb_ec_lineage.id` (hierarchical). |
 | `rcsb_find_disease_terms` | Resolve a free-text disease / condition to MONDO ids (via EBI OLS), annotated with PDB entry counts — then search by `rcsb_uniprot_annotation.annotation_lineage.id` (hierarchical, UniProt-based). |
 | `rcsb_find_organisms` | Resolve a free-text organism / common name / clade to NCBI Taxonomy ids (via UniProt taxonomy), annotated with PDB entry counts — then search by `rcsb_entity_source_organism.taxonomy_lineage.id` (hierarchical: a clade id matches every organism beneath it). |
-| `rcsb_search_fulltext` | Free-text keyword search (e.g. `"CRISPR Cas9"`). |
-| `rcsb_search_by_attribute` | Structured search on an indexed attribute (resolution, organism, release date, ...). Supports `exists`, `negation`, `case_sensitive`, and `chemical=True` (text_chem). |
-| `rcsb_search_combined` | Combine free text + multiple attribute filters (AND/OR) in one query, with optional sort. |
-| `rcsb_search_count` | Return only the **number** of matches — for "how many ..." questions. |
-| `rcsb_search_facets` | Aggregate matches into buckets/statistics (terms, histogram, date_histogram, range, cardinality) — for "distribution / breakdown / per X" questions. |
+| `rcsb_search_fulltext` | Free-text keyword search (e.g. `"CRISPR Cas9"`), optionally refined with structured `attributes` filters (AND/OR) and `sort`. |
+| `rcsb_search_by_attribute` | Structured search on one or more indexed attributes (resolution, organism, release date, ...) combined with a single AND/OR. Each `AttributeFilter` supports `exists`, `negation`, `case_sensitive`; `chemical=True` (text_chem). |
 | `rcsb_search_by_sequence` | MMseqs2 sequence-similarity search (BLAST-like). |
 | `rcsb_search_by_chemical` | Chemical search by SMILES/InChI descriptor (whole-molecule or substructure) or molecular formula. |
 | `rcsb_search_by_structure` | 3D shape-similarity search against a reference PDB assembly or chain. |
@@ -37,14 +34,21 @@ Bank structures** — discover, inspect, and cross-reference — from LLM client
 | `rcsb_search_strucmotif` | 3D **structural**-motif search: structures sharing a geometric arrangement of specific residues (e.g. a catalytic triad). |
 | `rcsb_search_advanced` | Escape hatch: run a raw Search API query body (`return_all_hits`, grouped results, deeply nested boolean queries, ...). |
 
-The three text tools (`rcsb_search_fulltext`, `rcsb_search_by_attribute`, `rcsb_search_combined`)
+The two text tools (`rcsb_search_fulltext`, `rcsb_search_by_attribute`)
 also take `group_by_identity` (100/95/90/70/50/30) to return one representative
 per sequence-identity cluster — i.e. non-redundant results. To search
 chemical-component attributes, find the path with
 `rcsb_list_pdb_search_attributes(schema="chemical")`, then pass `chemical=True` to
-`rcsb_search_by_attribute` / `rcsb_search_combined` (usually with `return_type="mol_definition"`).
+`rcsb_search_by_attribute` / `rcsb_search_fulltext` (usually with `return_type="mol_definition"`).
 The chemical catalog is generated from the live metadata schema by
 [`scripts/generate_chemical_attributes.py`](scripts/generate_chemical_attributes.py).
+
+Counting and faceting are **output options on every `rcsb_search_*` tool**, not separate
+tools: each response includes `total_count` (the full match count — for "how many ..." run a
+search with `limit=1` and read it), and passing `facets` returns a breakdown
+(terms/histogram/date_histogram/range/cardinality) instead of hits. The `rcsb_search_by_*`
+service tools (sequence, chemical, structure, seq/struc-motif) also take optional `attributes`
+filters, so e.g. a sequence search can be restricted to an organism in one call.
 
 **Paging.** Every search tool that returns hits accepts `limit` (1–100, default
 10) and `offset` (default 0). Each response reports `total_count`, `has_more`,
@@ -183,8 +187,8 @@ Restart Claude Desktop. The tools appear under the connectors (plug) icon.
 
 ## Example prompts
 
-- "Find high-resolution human hemoglobin structures." → `rcsb_search_by_attribute` + `rcsb_search_fulltext`
-- "Human hemoglobin structures better than 2 Å, best resolution first." → `rcsb_search_combined`
+- "Find high-resolution human hemoglobin structures." → `rcsb_search_fulltext` (keyword + `attributes`)
+- "Human hemoglobin structures better than 2 Å, best resolution first." → `rcsb_search_fulltext` (keyword + `attributes`, `sort_by`)
 - "What PDB entries match this protein sequence: MTEY..." → `rcsb_search_by_sequence`
 - "Find structures containing a ligand like this SMILES / with formula C8H9NO2." → `rcsb_search_by_chemical`
 - "Which structures have a 3D fold similar to 4HHB?" → `rcsb_search_by_structure`
@@ -194,9 +198,9 @@ Restart Claude Desktop. The tools appear under the connectors (plug) icon.
 - "Alcohol dehydrogenase structures / any EC 3.4.21 serine protease." → `rcsb_find_enzyme_classes` → `rcsb_search_by_attribute` on `rcsb_polymer_entity.rcsb_ec_lineage.id`
 - "Structures of proteins associated with cystic fibrosis / breast cancer." → `rcsb_find_disease_terms` → `rcsb_search_by_attribute` on `rcsb_uniprot_annotation.annotation_lineage.id`
 - "Structures from mammals / from a particular organism or clade." → `rcsb_find_organisms` → `rcsb_search_by_attribute` on `rcsb_entity_source_organism.taxonomy_lineage.id`
-- "Non-redundant human kinase structures (90% identity clusters)." → `rcsb_search_fulltext` / `rcsb_search_combined` with `group_by_identity=90`
-- "How many human X-ray structures are there?" → `rcsb_search_count`
-- "Break down ribosome structures by experimental method / by release year." → `rcsb_search_facets`
+- "Non-redundant human kinase structures (90% identity clusters)." → `rcsb_search_fulltext` with `group_by_identity=90`
+- "How many human X-ray structures are there?" → `rcsb_search_by_attribute` (read `total_count`)
+- "Break down ribosome structures by experimental method / by release year." → `rcsb_search_fulltext` with `facets`
 - "Find structures with the same catalytic-site geometry as residues 162/193/219 of 2MNR." → `rcsb_search_strucmotif`
 - "Find chemical components under 150 Da." → `rcsb_list_pdb_search_attributes(schema="chemical")` + `rcsb_search_by_attribute` with `chemical=True`
 - "Summarize PDB entries 4HHB, 1MBN and 6VXX." → `rcsb_get_entries`

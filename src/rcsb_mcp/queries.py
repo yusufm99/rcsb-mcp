@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
+from rcsb_mcp.chemical_search_attributes import CHEMICAL_SEARCH_ATTRIBUTES
 from rcsb_mcp.graphql_queries import ENTRY_ANNOTATIONS, ENTRY_EXP_INFO
+from rcsb_mcp.search_attributes import SEARCH_ATTRIBUTES
 
 # Valid return types accepted by the Search API.
 RETURN_TYPES = {
@@ -135,6 +137,75 @@ def _request_options(
     return options
 
 
+# Attribute -> declared value type, from the generated Search schema catalogs. Clients
+# commonly send numbers as strings (e.g. "2.0"), which the API rejects for numeric
+# attributes; coercion is driven off this *type* (not the operator) so a date attribute —
+# which shares greater/less/range with integers — is never turned into a number, and a
+# string attribute never is either.
+_ATTR_TYPES: dict[str, str] = {a["attribute"]: a["type"] for a in SEARCH_ATTRIBUTES}
+_CHEM_ATTR_TYPES: dict[str, str] = {a["attribute"]: a["type"] for a in CHEMICAL_SEARCH_ATTRIBUTES}
+
+# Operators that require a numeric value — used ONLY as a fallback for attributes absent
+# from the catalogs (so coercion still helps an uncatalogued numeric path).
+NUMERIC_TEXT_OPERATORS = {
+    "greater", "greater_or_equal", "less", "less_or_equal", "equals", "range",
+}
+
+
+def _as_number(v: Any) -> Any:
+    """A plain-number string -> int/float; anything else (incl. ISO dates) unchanged."""
+    if isinstance(v, str):
+        s = v.strip()
+        try:
+            return int(s)
+        except ValueError:
+            try:
+                return float(s)
+            except ValueError:
+                return v
+    return v
+
+
+def _coerce_scalar(v: Any, attr_type: str | None, operator: str) -> Any:
+    """Coerce one value to the attribute's declared numeric type.
+
+    'integer' -> int, 'number' -> float; 'date'/'string' (any other known type) are left
+    untouched. When the attribute is absent from the catalog (attr_type is None) fall back
+    to a numeric-operator heuristic so an uncatalogued numeric path still works.
+    """
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if attr_type == "integer":
+        try:
+            return int(s)
+        except ValueError:
+            return v
+    if attr_type == "number":
+        try:
+            return float(s)
+        except ValueError:
+            return v
+    if attr_type is not None:
+        return v  # known string / date attribute -> never coerce
+    return _as_number(v) if operator in NUMERIC_TEXT_OPERATORS else v  # uncatalogued fallback
+
+
+def _coerce_value(value: Any, operator: str, attribute: str, service: str) -> Any:
+    """Coerce a query value to the attribute's declared type (see _coerce_scalar).
+
+    Applies to a scalar, each element of an 'in' list, and the from/to bounds of a
+    'range' object. Driven by the attribute's type from the Search schema catalog.
+    """
+    attr_type = (_CHEM_ATTR_TYPES if service == "text_chem" else _ATTR_TYPES).get(attribute)
+    if isinstance(value, dict):  # range: {from, to, include_lower, include_upper}
+        return {k: (_coerce_scalar(v, attr_type, operator) if k in ("from", "to") else v)
+                for k, v in value.items()}
+    if isinstance(value, list):  # 'in'
+        return [_coerce_scalar(v, attr_type, operator) for v in value]
+    return _coerce_scalar(value, attr_type, operator)
+
+
 def _text_node(
     attribute: str,
     operator: str,
@@ -148,14 +219,15 @@ def _text_node(
 
     `service` is "text" for structure attributes or "text_chem" for
     chemical-component attributes. The 'exists' operator takes no value; all
-    others require one. `negation` inverts the match and `case_sensitive`
-    forces exact-case comparison.
+    others require one (a numeric-looking string is coerced to the attribute's
+    declared type — see _coerce_value). `negation` inverts the match and
+    `case_sensitive` forces exact-case comparison.
     """
     if operator not in TEXT_OPERATORS:
         raise ValueError(f"operator must be one of {sorted(TEXT_OPERATORS)}")
     params: dict[str, Any] = {"attribute": attribute, "operator": operator}
     if operator != "exists":
-        params["value"] = value
+        params["value"] = _coerce_value(value, operator, attribute, service)
     if negation:
         params["negation"] = True
     if case_sensitive:
@@ -284,6 +356,44 @@ def build_attribute_query(
     }
 
 
+def _combine_service(
+    service_node: dict[str, Any],
+    attributes: list[dict[str, Any]] | None,
+    logical_operator: str = "and",
+) -> dict[str, Any]:
+    """AND/OR a primary service terminal (sequence/structure/chemical/motif) with optional
+    structured attribute filters. Returns the bare terminal when there are no attributes,
+    else a group wrapping the service node and one text terminal per filter — the same shape
+    RCSB.org produces when you add attribute refinements to a service search.
+    """
+    if not attributes:
+        return service_node
+    if logical_operator not in {"and", "or"}:
+        raise ValueError('logical_operator must be "and" or "or"')
+    nodes = [service_node]
+    for f in attributes:
+        nodes.append(
+            _text_node(
+                f["attribute"], f.get("operator"), f.get("value"),
+                negation=f.get("negation", False),
+                case_sensitive=f.get("case_sensitive", False),
+            )
+        )
+    return {"type": "group", "logical_operator": logical_operator, "nodes": nodes}
+
+
+def _facet_options(
+    facets: list[dict[str, Any]], include_computed: bool = False
+) -> dict[str, Any]:
+    """request_options for a facet (aggregation-only) query: rows=0 + validated facets."""
+    content = ["experimental"] + (["computational"] if include_computed else [])
+    return {
+        "paginate": {"start": 0, "rows": 0},
+        "results_content_type": content,
+        "facets": [_build_facet(f) for f in facets],
+    }
+
+
 def build_combined_query(
     full_text: str | None = None,
     filters: list[dict[str, Any]] | None = None,
@@ -300,6 +410,7 @@ def build_combined_query(
     group_by_ranking: str | None = None,
     group_by_ranking_direction: str = "desc",
     chemical: bool = False,
+    facets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Combine a full-text term and/or several attribute filters with AND/OR.
 
@@ -330,18 +441,21 @@ def build_combined_query(
         service="text_chem" if chemical else "text",
     )
 
-    options = _request_options(
-        start, rows, include_computed,
-        all_hits=all_hits,
-        group_by_identity=group_by_identity,
-        group_by_uniprot=group_by_uniprot,
-        group_by_ranking=group_by_ranking,
-        group_by_ranking_direction=group_by_ranking_direction,
-    )
-    if sort_by:
-        if sort_direction not in {"asc", "desc"}:
-            raise ValueError('sort_direction must be "asc" or "desc"')
-        options["sort"] = [{"sort_by": sort_by, "direction": sort_direction}]
+    if facets:
+        options = _facet_options(facets, include_computed)
+    else:
+        options = _request_options(
+            start, rows, include_computed,
+            all_hits=all_hits,
+            group_by_identity=group_by_identity,
+            group_by_uniprot=group_by_uniprot,
+            group_by_ranking=group_by_ranking,
+            group_by_ranking_direction=group_by_ranking_direction,
+        )
+        if sort_by:
+            if sort_direction not in {"asc", "desc"}:
+                raise ValueError('sort_direction must be "asc" or "desc"')
+            options["sort"] = [{"sort_by": sort_by, "direction": sort_direction}]
     return {
         "query": query,
         "return_type": return_type,
@@ -357,8 +471,13 @@ def build_sequence_query(
     return_type: str = "polymer_entity",
     rows: int = 10,
     start: int = 0,
+    all_hits: bool = False,
+    attributes: list[dict[str, Any]] | None = None,
+    logical_operator: str = "and",
+    facets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """MMseqs2 sequence-similarity search (BLAST-like).
+    """MMseqs2 sequence-similarity search (BLAST-like), optionally AND/OR-refined with
+    attribute filters and/or aggregated into facets.
 
     identity_cutoff is a fraction in [0, 1]. sequence_type is one of
     "protein", "dna", "rna".
@@ -367,23 +486,30 @@ def build_sequence_query(
         raise ValueError(f"sequence_type must be one of {sorted(SEQUENCE_TYPES)}")
     if not 0.0 <= identity_cutoff <= 1.0:
         raise ValueError("identity_cutoff must be between 0 and 1")
+    if return_type not in RETURN_TYPES:
+        raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
+    node = {
+        "type": "terminal",
+        "service": "sequence",
+        "parameters": {
+            "value": sequence.strip().upper(),
+            "sequence_type": sequence_type,
+            "identity_cutoff": identity_cutoff,
+            "evalue_cutoff": evalue_cutoff,
+        },
+    }
+    if facets:
+        options = _facet_options(facets)
+    elif all_hits:
+        options = {"return_all_hits": True, "results_content_type": ["experimental"],
+                   "scoring_strategy": "sequence"}
+    else:
+        options = {"paginate": {"start": start, "rows": rows},
+                   "results_content_type": ["experimental"], "scoring_strategy": "sequence"}
     return {
-        "query": {
-            "type": "terminal",
-            "service": "sequence",
-            "parameters": {
-                "value": sequence.strip().upper(),
-                "sequence_type": sequence_type,
-                "identity_cutoff": identity_cutoff,
-                "evalue_cutoff": evalue_cutoff,
-            },
-        },
+        "query": _combine_service(node, attributes, logical_operator),
         "return_type": return_type,
-        "request_options": {
-            "paginate": {"start": start, "rows": rows},
-            "results_content_type": ["experimental"],
-            "scoring_strategy": "sequence",
-        },
+        "request_options": options,
     }
 
 
@@ -396,8 +522,13 @@ def build_chemical_query(
     return_type: str = "mol_definition",
     rows: int = 10,
     start: int = 0,
+    all_hits: bool = False,
+    attributes: list[dict[str, Any]] | None = None,
+    logical_operator: str = "and",
+    facets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Chemical search by SMILES/InChI descriptor or by molecular formula.
+    """Chemical search by SMILES/InChI descriptor or by molecular formula, optionally
+    AND/OR-refined with attribute filters and/or aggregated into facets.
 
     query_type="descriptor": match `value` (a SMILES or InChI string) using a
     graph/fingerprint `match_type` (e.g. "graph-relaxed" for exact molecules,
@@ -424,10 +555,13 @@ def build_chemical_query(
         params = {"type": "formula", "value": value.strip(), "match_subset": bool(match_subset)}
     else:
         raise ValueError('query_type must be "descriptor" or "formula"')
+    node = {"type": "terminal", "service": "chemical", "parameters": params}
+    options = (_facet_options(facets) if facets
+               else _request_options(start, rows, False, all_hits=all_hits, scoring_strategy="chemical"))
     return {
-        "query": {"type": "terminal", "service": "chemical", "parameters": params},
+        "query": _combine_service(node, attributes, logical_operator),
         "return_type": return_type,
-        "request_options": _request_options(start, rows, False, scoring_strategy="chemical"),
+        "request_options": options,
     }
 
 
@@ -438,8 +572,13 @@ def build_structure_query(
     return_type: str | None = None,
     rows: int = 10,
     start: int = 0,
+    all_hits: bool = False,
+    attributes: list[dict[str, Any]] | None = None,
+    logical_operator: str = "and",
+    facets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """3D shape-similarity search against an existing PDB structure.
+    """3D shape-similarity search against an existing PDB structure, optionally AND/OR-refined
+    with attribute filters and/or aggregated into facets.
 
     Provide a reference by entry + assembly (e.g. entry_id="4HHB", assembly_id="1")
     or entry + chain (asym_id="A"). Defaults to assembly "1" if neither is given.
@@ -457,10 +596,13 @@ def build_structure_query(
     rt = return_type or default_return
     if rt not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
+    node = {"type": "terminal", "service": "structure", "parameters": {"value": value}}
+    options = (_facet_options(facets) if facets
+               else _request_options(start, rows, False, all_hits=all_hits, scoring_strategy="structure"))
     return {
-        "query": {"type": "terminal", "service": "structure", "parameters": {"value": value}},
+        "query": _combine_service(node, attributes, logical_operator),
         "return_type": rt,
-        "request_options": _request_options(start, rows, False, scoring_strategy="structure"),
+        "request_options": options,
     }
 
 
@@ -471,8 +613,13 @@ def build_seqmotif_query(
     return_type: str = "polymer_entity",
     rows: int = 10,
     start: int = 0,
+    all_hits: bool = False,
+    attributes: list[dict[str, Any]] | None = None,
+    logical_operator: str = "and",
+    facets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Short sequence-motif search (PROSITE pattern, regex, or simple wildcards).
+    """Short sequence-motif search (PROSITE pattern, regex, or simple wildcards), optionally
+    AND/OR-refined with attribute filters and/or aggregated into facets.
 
     Examples: pattern_type="prosite" value "C-x(2,4)-C-x(3)-[LIVMFYWC]...",
     pattern_type="regex" value "C..H[LIVF]", pattern_type="simple" value "NXS".
@@ -483,18 +630,20 @@ def build_seqmotif_query(
         raise ValueError(f"sequence_type must be one of {sorted(SEQUENCE_TYPES)}")
     if return_type not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    return {
-        "query": {
-            "type": "terminal",
-            "service": "seqmotif",
-            "parameters": {
-                "value": pattern.strip(),
-                "pattern_type": pattern_type,
-                "sequence_type": sequence_type,
-            },
+    node = {
+        "type": "terminal",
+        "service": "seqmotif",
+        "parameters": {
+            "value": pattern.strip(),
+            "pattern_type": pattern_type,
+            "sequence_type": sequence_type,
         },
+    }
+    options = _facet_options(facets) if facets else _request_options(start, rows, False, all_hits=all_hits)
+    return {
+        "query": _combine_service(node, attributes, logical_operator),
         "return_type": return_type,
-        "request_options": _request_options(start, rows, False),
+        "request_options": options,
     }
 
 
@@ -634,9 +783,14 @@ def build_strucmotif_query(
     return_type: str = "polymer_entity",
     rows: int = 10,
     start: int = 0,
+    all_hits: bool = False,
+    attributes: list[dict[str, Any]] | None = None,
+    logical_operator: str = "and",
+    facets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """3D structural-motif search: find structures containing a geometric
-    arrangement of residues like the one in a reference structure.
+    arrangement of residues like the one in a reference structure. Optionally
+    AND/OR-refined with attribute filters and/or aggregated into facets.
 
     Distinct from build_structure_query (whole-shape similarity). `residue_ids`
     is a list of 2-10 dicts {label_asym_id, label_seq_id, struct_oper_id?}.
@@ -678,10 +832,13 @@ def build_strucmotif_query(
         if limit < 0:
             raise ValueError("limit must be >= 0")
         params["limit"] = limit
+    node = {"type": "terminal", "service": "strucmotif", "parameters": params}
+    options = (_facet_options(facets) if facets
+               else _request_options(start, rows, False, all_hits=all_hits, scoring_strategy="strucmotif"))
     return {
-        "query": {"type": "terminal", "service": "strucmotif", "parameters": params},
+        "query": _combine_service(node, attributes, logical_operator),
         "return_type": return_type,
-        "request_options": _request_options(start, rows, False, scoring_strategy="strucmotif"),
+        "request_options": options,
     }
 
 

@@ -112,6 +112,34 @@ def test_attribute_exists_and_flags():
     print("ok: attribute exists/flags")
 
 
+def test_value_coercion():
+    # Coercion is driven by the attribute's declared TYPE (from the schema catalog),
+    # not by the operator.
+    def P(a, o, v):
+        return queries.build_attribute_query(a, o, v)["query"]["parameters"]
+    # 'number' attribute: a numeric string becomes a float.
+    pn = P("rcsb_entry_info.resolution_combined", "less", "2.0")
+    assert pn["value"] == 2.0 and isinstance(pn["value"], float)
+    # 'integer' attribute: becomes an int.
+    pi = P("rcsb_assembly_info.polymer_entity_instance_count_protein", "greater_or_equal", "6")
+    assert pi["value"] == 6 and isinstance(pi["value"], int)
+    # 'date' attribute: NEVER coerced — even a bare-year value that looks numeric and shares
+    # greater/less with integers stays a string (this is the type-vs-operator distinction).
+    assert P("rcsb_accession_info.initial_release_date", "greater", "2024")["value"] == "2024"
+    assert P("rcsb_accession_info.initial_release_date", "greater",
+             "2024-01-01T00:00:00Z")["value"] == "2024-01-01T00:00:00Z"
+    # 'string' attribute: never coerced (taxonomy_lineage.id "9606" must stay "9606").
+    ps = P("rcsb_entity_source_organism.taxonomy_lineage.id", "exact_match", "9606")
+    assert ps["value"] == "9606" and isinstance(ps["value"], str)
+    # range bounds coerced to the attribute's type; the include flags pass through.
+    pr = P("rcsb_entry_info.resolution_combined", "range",
+           {"from": "1", "to": "2.5", "include_lower": True})
+    assert pr["value"] == {"from": 1.0, "to": 2.5, "include_lower": True}
+    # uncatalogued attribute: falls back to the numeric-operator heuristic.
+    assert P("made.up.unknown_attr", "less", "2.0")["value"] == 2.0
+    print("ok: value coercion (type-driven)")
+
+
 def test_group_by_identity():
     q = queries.build_fulltext_query("kinase", return_type="polymer_entity", group_by_identity=30)
     opts = q["request_options"]
@@ -472,6 +500,42 @@ def test_seqcoord_validation():
     print("ok: seqcoord validation")
 
 
+def test_service_refinement_and_facets():
+    # A service search refined with attribute filters -> group(service terminal + text terminal).
+    q = queries.build_sequence_query(
+        "MTEY", identity_cutoff=0.9,
+        attributes=[{"attribute": "rcsb_entity_source_organism.taxonomy_lineage.name",
+                     "operator": "exact_match", "value": "Homo sapiens"}],
+        logical_operator="and",
+    )
+    grp = q["query"]
+    assert grp["type"] == "group" and grp["logical_operator"] == "and"
+    assert [n["service"] for n in grp["nodes"]] == ["sequence", "text"]
+    assert q["request_options"]["scoring_strategy"] == "sequence"  # hit path preserved
+    # No attributes -> bare service terminal (no wrapping group).
+    bare = queries.build_chemical_query("C8H10N4O2", query_type="formula")
+    assert bare["query"]["type"] == "terminal" and bare["query"]["service"] == "chemical"
+    # facets on a service search -> rows 0 + validated facets, with the attribute filter applied.
+    qf = queries.build_structure_query(
+        "4HHB", assembly_id="1",
+        attributes=[{"attribute": "rcsb_entry_info.resolution_combined",
+                     "operator": "less", "value": 3.0}],
+        facets=[{"name": "M", "aggregation_type": "terms", "attribute": "exptl.method"}],
+    )
+    assert qf["request_options"]["paginate"] == {"start": 0, "rows": 0}
+    assert qf["request_options"]["facets"][0]["attribute"] == "exptl.method"
+    assert qf["query"]["type"] == "group"  # structure terminal + attribute terminal
+    # facets on the text/attribute builder too.
+    qc = queries.build_combined_query(
+        full_text="ribosome",
+        facets=[{"name": "Y", "aggregation_type": "date_histogram",
+                 "attribute": "rcsb_accession_info.initial_release_date", "interval": "year"}],
+    )
+    assert qc["request_options"]["paginate"] == {"start": 0, "rows": 0}
+    assert "facets" in qc["request_options"]
+    print("ok: service refinement + facets")
+
+
 if __name__ == "__main__":
     test_fulltext()
     test_fulltext_with_computed()
@@ -481,6 +545,7 @@ if __name__ == "__main__":
     test_combined_single_collapses()
     test_all_hits()
     test_attribute_exists_and_flags()
+    test_value_coercion()
     test_group_by_identity()
     test_group_by_ranking()
     test_group_by_uniprot()
@@ -490,6 +555,7 @@ if __name__ == "__main__":
     test_facet_query()
     test_count_query()
     test_strucmotif()
+    test_service_refinement_and_facets()
     test_chemical_attribute_service()
     test_validation_errors()
     test_graphql_batch()
