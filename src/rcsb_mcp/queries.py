@@ -94,6 +94,7 @@ def _request_options(
     scoring_strategy: str | None = None,
     group_by: str | None = None,
     group_by_ranking: str | None = None,
+    return_type: str | None = None,
 ) -> dict[str, Any]:
     """Common request_options block: pagination, content type, sort, grouping.
 
@@ -120,6 +121,8 @@ def _request_options(
     if group_by_ranking is not None and group_by is None:
         raise ValueError("group_by_ranking requires group_by")
     if group_by is not None:
+        if return_type != "polymer_entity":
+            raise ValueError("group_by is only available with return_type='polymer_entity'")
         if group_by not in GROUP_BY_METHODS:
             raise ValueError(f"group_by must be one of {sorted(GROUP_BY_METHODS)}")
         gb: dict[str, Any] = dict(GROUP_BY_METHODS[group_by])
@@ -358,8 +361,6 @@ def build_combined_query(
     """
     if return_type not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    if group_by is not None and return_type != "polymer_entity":
-        raise ValueError("group_by is only available with return_type='polymer_entity'")
 
     query = _search_node(
         full_text, filters, logical_operator,
@@ -374,6 +375,7 @@ def build_combined_query(
             all_hits=all_hits,
             group_by=group_by,
             group_by_ranking=group_by_ranking,
+            return_type=return_type,
         )
         if sort_by:
             if sort_direction not in {"asc", "desc"}:
@@ -398,6 +400,8 @@ def build_sequence_query(
     attributes: list[dict[str, Any]] | None = None,
     logical_operator: str = "and",
     facets: list[dict[str, Any]] | None = None,
+    group_by: str | None = None,
+    group_by_ranking: str | None = None,
 ) -> dict[str, Any]:
     """MMseqs2 sequence-similarity search (BLAST-like), optionally AND/OR-refined with
     attribute filters and/or aggregated into facets.
@@ -421,14 +425,9 @@ def build_sequence_query(
             "evalue_cutoff": evalue_cutoff,
         },
     }
-    if facets:
-        options = _facet_options(facets)
-    elif all_hits:
-        options = {"return_all_hits": True, "results_content_type": ["experimental"],
-                   "scoring_strategy": "sequence"}
-    else:
-        options = {"paginate": {"start": start, "rows": rows},
-                   "results_content_type": ["experimental"], "scoring_strategy": "sequence"}
+    options = _facet_options(facets) if facets else _request_options(
+        start, rows, False, all_hits=all_hits, scoring_strategy="sequence",
+        group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type)
     return {
         "query": _combine_service(node, attributes, logical_operator),
         "return_type": return_type,
@@ -449,6 +448,8 @@ def build_chemical_query(
     attributes: list[dict[str, Any]] | None = None,
     logical_operator: str = "and",
     facets: list[dict[str, Any]] | None = None,
+    group_by: str | None = None,
+    group_by_ranking: str | None = None,
 ) -> dict[str, Any]:
     """Chemical search by SMILES/InChI descriptor or by molecular formula, optionally
     AND/OR-refined with attribute filters and/or aggregated into facets.
@@ -480,7 +481,7 @@ def build_chemical_query(
         raise ValueError('query_type must be "descriptor" or "formula"')
     node = {"type": "terminal", "service": "chemical", "parameters": params}
     options = (_facet_options(facets) if facets
-               else _request_options(start, rows, False, all_hits=all_hits, scoring_strategy="chemical"))
+               else _request_options(start, rows, False, all_hits=all_hits, group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type, scoring_strategy="chemical"))
     return {
         "query": _combine_service(node, attributes, logical_operator),
         "return_type": return_type,
@@ -499,6 +500,8 @@ def build_structure_query(
     attributes: list[dict[str, Any]] | None = None,
     logical_operator: str = "and",
     facets: list[dict[str, Any]] | None = None,
+    group_by: str | None = None,
+    group_by_ranking: str | None = None,
 ) -> dict[str, Any]:
     """3D shape-similarity search against an existing PDB structure, optionally AND/OR-refined
     with attribute filters and/or aggregated into facets.
@@ -521,7 +524,7 @@ def build_structure_query(
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
     node = {"type": "terminal", "service": "structure", "parameters": {"value": value}}
     options = (_facet_options(facets) if facets
-               else _request_options(start, rows, False, all_hits=all_hits, scoring_strategy="structure"))
+               else _request_options(start, rows, False, all_hits=all_hits, group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type, scoring_strategy="structure"))
     return {
         "query": _combine_service(node, attributes, logical_operator),
         "return_type": rt,
@@ -540,6 +543,8 @@ def build_seqmotif_query(
     attributes: list[dict[str, Any]] | None = None,
     logical_operator: str = "and",
     facets: list[dict[str, Any]] | None = None,
+    group_by: str | None = None,
+    group_by_ranking: str | None = None,
 ) -> dict[str, Any]:
     """Short sequence-motif search (PROSITE pattern, regex, or simple wildcards), optionally
     AND/OR-refined with attribute filters and/or aggregated into facets.
@@ -562,7 +567,7 @@ def build_seqmotif_query(
             "sequence_type": sequence_type,
         },
     }
-    options = _facet_options(facets) if facets else _request_options(start, rows, False, all_hits=all_hits)
+    options = _facet_options(facets) if facets else _request_options(start, rows, False, all_hits=all_hits, group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type)
     return {
         "query": _combine_service(node, attributes, logical_operator),
         "return_type": return_type,
@@ -710,6 +715,8 @@ def build_strucmotif_query(
     attributes: list[dict[str, Any]] | None = None,
     logical_operator: str = "and",
     facets: list[dict[str, Any]] | None = None,
+    group_by: str | None = None,
+    group_by_ranking: str | None = None,
 ) -> dict[str, Any]:
     """3D structural-motif search: find structures containing a geometric
     arrangement of residues like the one in a reference structure. Optionally
@@ -757,7 +764,7 @@ def build_strucmotif_query(
         params["limit"] = limit
     node = {"type": "terminal", "service": "strucmotif", "parameters": params}
     options = (_facet_options(facets) if facets
-               else _request_options(start, rows, False, all_hits=all_hits, scoring_strategy="strucmotif"))
+               else _request_options(start, rows, False, all_hits=all_hits, group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type, scoring_strategy="strucmotif"))
     return {
         "query": _combine_service(node, attributes, logical_operator),
         "return_type": return_type,
