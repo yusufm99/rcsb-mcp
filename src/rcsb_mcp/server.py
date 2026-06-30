@@ -1785,7 +1785,7 @@ async def rcsb_describe_data_object(
     Args:
         object_key: Which object to describe — a key matching the rcsb_get_* tools, e.g.
             "entries", "polymer_entities", "assemblies", "chem_comps", "interfaces",
-            "uniprot", ... (entry_annotations/entry_exp_info also map to the entry type).
+            "uniprot", ...
         into: Optional dot-path of nested object field(s) to drill into, e.g.
             "rcsb_entry_info" or "polymer_entities.rcsb_polymer_entity".
         query: Optional case-insensitive keyword to filter fields by name/description.
@@ -1822,41 +1822,6 @@ async def rcsb_get_entries(entry_ids: list[str], fields: str | None = None) -> d
             nested object with into="struct" to list its leaves.
     """
     return await _query_batch("entries", entry_ids, fields)
-
-
-@mcp.tool(annotations=READ_ONLY)
-async def rcsb_get_entry_annotations(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
-    """Fetch biological and functional annotations for one or more PDB entries —
-    Gene Ontology terms (molecular function, biological process, cellular component),
-    protein-domain classifications, disease associations, antibody and gene-product
-    annotations, and more.
-
-    Args:
-        entry_ids: 4-character PDB entry codes, e.g. ["4HHB", "1MBN"]; pass a one-element
-            list for a single entry. Unknown IDs are returned under "not_found".
-        fields: Optional GraphQL selection set replacing the curated default; accepts
-            dotted paths (e.g. "rcsb_external_references.type") or GraphQL braces, and may mix them.
-            Discover paths with rcsb_describe_data_object("entry_annotations"), then drill into
-            a nested object with into="rcsb_external_references" to list its leaves.
-    """
-    return await _query_batch("entry_annotations", entry_ids, fields)
-
-
-@mcp.tool(annotations=READ_ONLY)
-async def rcsb_get_entry_exp_info(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
-    """Fetch detailed experimental conditions and structure-determination metadata for
-    one or more PDB entries — sample temperature, pH, pressure, experimental method,
-    diffraction data, and other reported parameters.
-
-    Args:
-        entry_ids: 4-character PDB entry codes, e.g. ["4HHB", "1MBN"]; pass a one-element
-            list for a single entry. Unknown IDs are returned under "not_found".
-        fields: Optional GraphQL selection set replacing the curated default; accepts
-            dotted paths (e.g. "exptl.method") or GraphQL braces, and may mix them.
-            Discover paths with rcsb_describe_data_object("entry_exp_info"), then drill into a
-            nested object with into="exptl" to list its leaves.
-    """
-    return await _query_batch("entry_exp_info", entry_ids, fields)
 
 
 @mcp.tool(annotations=READ_ONLY)

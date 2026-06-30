@@ -484,10 +484,10 @@ def test_normalize_fields():
 
 def test_graphql_registry():
     # Every endpoint maps to a usable builder with a non-empty default selection.
-    assert len(queries.DATA_OBJECTS) == 18
+    assert len(queries.DATA_OBJECTS) == 16
     batch = [k for k, s in queries.DATA_OBJECTS.items() if s.batch]
     single = [k for k, s in queries.DATA_OBJECTS.items() if not s.batch]
-    assert len(batch) == 15 and len(single) == 3
+    assert len(batch) == 13 and len(single) == 3
     assert set(single) == {"uniprot", "pubmed", "group_provenance"}
     for key, spec in queries.DATA_OBJECTS.items():
         assert spec.default_fields.startswith("rcsb_id"), key
@@ -496,7 +496,7 @@ def test_graphql_registry():
         ids = sample if not spec.batch else [sample]
         body = queries.build_data_query(key, ids)
         assert f"{spec.root_field}({spec.arg}: $ids)" in body["query"], key
-    print("ok: graphql registry (18 endpoints)")
+    print("ok: graphql registry (16 endpoints)")
 
 
 def test_seqcoord_alignments():

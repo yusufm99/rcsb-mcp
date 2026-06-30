@@ -14,7 +14,6 @@ three RCSB APIs: Search (REST), Data (GraphQL), and Sequence Coordinates (GraphQ
 src/rcsb_mcp/
   server.py                  MCP server: @mcp.tool() tools, the @mcp.prompt() persona, HTTP calls, schema introspection
   queries.py                 PURE request-body builders (no network) + the DATA_OBJECTS registry
-  graphql_queries.py         Large GraphQL field-selection constants (ENTRY_ANNOTATIONS, ...)
   search_attributes.py       SEARCH_ATTRIBUTES catalog (structure search schema)
   chemical_search_attributes.py  CHEMICAL_SEARCH_ATTRIBUTES catalog — auto-generated (see scripts/)
   prompts/pdb_assistant.md   Assistant persona + HTML-report format; served as the `pdb_assistant` MCP prompt (package data)
@@ -41,7 +40,7 @@ tests/
 ## Dev workflow
 
 ```bash
-# Unit tests (no network) — run after touching queries.py / graphql_queries.py
+# Unit tests (no network) — run after touching queries.py
 hatch test                       # or: python tests/test_queries.py
 
 # Syntax check both core modules

@@ -65,8 +65,6 @@ Unknown IDs are reported under `not_found`.
 | Tool | Object | Example ID                       |
 |------|--------|----------------------------------|
 | `rcsb_get_entries` | PDB entries | `"4HHB"`                         |
-| `rcsb_get_entry_annotations` | Entry biological/functional annotations (GO, domains, disease, ...) | `"4HHB"`                         |
-| `rcsb_get_entry_exp_info` | Entry experimental conditions / determination metadata | `"4HHB"`                         |
 | `rcsb_get_polymer_entities` | Polymer entities (protein/NA) | `"4HHB_1"`                       |
 | `rcsb_get_nonpolymer_entities` | Ligand/cofactor entities | `"4HHB_3"`                       |
 | `rcsb_get_branched_entities` | Carbohydrate entities | `"5FMB_2"`                       |
@@ -87,7 +85,7 @@ Unknown IDs are reported under `not_found`.
 The Search API only returns identifiers, so a search is the first step: batch the
 returned ids into the matching `rcsb_get_*` tool to fetch titles, organisms, and
 other metadata (these tools query the GraphQL endpoint, batching every requested ID
-into one request). All 18 typed tools are generated from a single registry in
+into one request). All 16 typed tools are generated from a single registry in
 [`queries.py`](src/rcsb_mcp/queries.py) (`DATA_OBJECTS`), so adding a field or
 endpoint is a one-line change.
 
