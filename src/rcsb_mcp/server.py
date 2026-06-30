@@ -1640,6 +1640,12 @@ async def rcsb_search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
             "attribute": "rcsb_accession_info.initial_release_date",
             "operator": "greater", "value": "2019-08-20"}}]},
           "return_type": "polymer_entity"}
+
+    Args:
+        query_body: A complete RCSB Search API request — {"query", "return_type",
+            "request_options"} — built from "group" and "terminal" nodes (full query
+            language at https://search.rcsb.org/). Returns the normalized
+            {total_count, returned, hits} result.
     """
     raw = await _post_search(query_body)
     return _format(raw, query_body)
@@ -1801,17 +1807,19 @@ async def rcsb_get_entries(entry_ids: list[str], fields: str | None = None) -> d
     """Fetch metadata for one or more PDB entries (title, method, resolution, size,
     dates, primary citation, and publication abstract).
 
-    IDs are 4-character entry codes, e.g. ["4HHB", "1MBN"]. Unknown IDs are
-    listed under "not_found". For a single entry pass a one-element list.
-
     The response also lists the entry's component ids under
     rcsb_entry_container_identifiers — use these to drill into the structure. They are
     bare numbers; compose them with the entry id to call the matching rcsb_get_* tool:
     polymer_entity_ids/non_polymer_entity_ids "N" -> "<ENTRY>_N" (rcsb_get_polymer_entities /
     rcsb_get_nonpolymer_entities); assembly_ids "N" -> "<ENTRY>-N" (rcsb_get_assemblies).
 
-    For fields beyond this summary, use rcsb_describe_data_object("entries") to find the
-    path and pass it via `fields`.
+    Args:
+        entry_ids: 4-character PDB entry codes, e.g. ["4HHB", "1MBN"]; pass a one-element
+            list for a single entry. Unknown IDs are returned under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "struct.title") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("entries"), then drill into a
+            nested object with into="struct" to list its leaves.
     """
     return await _query_batch("entries", entry_ids, fields)
 
@@ -1823,9 +1831,13 @@ async def rcsb_get_entry_annotations(entry_ids: list[str], fields: str | None = 
     protein-domain classifications, disease associations, antibody and gene-product
     annotations, and more.
 
-    IDs are 4-character entry codes, e.g. ["4HHB", "1MBN"]; for a single entry pass a
-    one-element list. Unknown IDs are returned under "not_found"; pass `fields` to
-    request other properties (paths via rcsb_describe_data_object).
+    Args:
+        entry_ids: 4-character PDB entry codes, e.g. ["4HHB", "1MBN"]; pass a one-element
+            list for a single entry. Unknown IDs are returned under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_external_references.type") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("entry_annotations"), then drill into
+            a nested object with into="rcsb_external_references" to list its leaves.
     """
     return await _query_batch("entry_annotations", entry_ids, fields)
 
@@ -1836,9 +1848,13 @@ async def rcsb_get_entry_exp_info(entry_ids: list[str], fields: str | None = Non
     one or more PDB entries — sample temperature, pH, pressure, experimental method,
     diffraction data, and other reported parameters.
 
-    IDs are 4-character entry codes, e.g. ["4HHB", "1MBN"]; for a single entry pass a
-    one-element list. Unknown IDs are returned under "not_found"; pass `fields` to
-    request other properties (paths via rcsb_describe_data_object).
+    Args:
+        entry_ids: 4-character PDB entry codes, e.g. ["4HHB", "1MBN"]; pass a one-element
+            list for a single entry. Unknown IDs are returned under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "exptl.method") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("entry_exp_info"), then drill into a
+            nested object with into="exptl" to list its leaves.
     """
     return await _query_batch("entry_exp_info", entry_ids, fields)
 
@@ -1847,10 +1863,15 @@ async def rcsb_get_entry_exp_info(entry_ids: list[str], fields: str | None = Non
 async def rcsb_get_polymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entities (protein/nucleic-acid molecules).
 
-    IDs combine entry + entity number, e.g. ["4HHB_1"] — exactly what
-    rcsb_search_by_sequence returns. Default fields: description, sequence, length,
-    weight, and source organism. Unknown IDs are returned under "not_found"; pass
-    `fields` to request other properties (paths via rcsb_describe_data_object).
+    Default fields: description, sequence, length, weight, and source organism.
+
+    Args:
+        entity_ids: entry + entity number, e.g. ["4HHB_1"] — exactly what
+            rcsb_search_by_sequence returns. Unknown IDs are returned under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_polymer_entity.pdbx_description") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("polymer_entities"), then drill into a
+            nested object with into="rcsb_polymer_entity" to list its leaves.
     """
     return await _query_batch("polymer_entities", entity_ids, fields)
 
@@ -1859,10 +1880,16 @@ async def rcsb_get_polymer_entities(entity_ids: list[str], fields: str | None = 
 async def rcsb_get_nonpolymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer (ligand/cofactor) entities, e.g. ["4HHB_3"].
 
-    Default fields: description, weight, copy count, and the bound chemical
-    component ID. Use rcsb_get_chem_comps for the chemistry of that component.
-    Unknown IDs are returned under "not_found"; pass `fields` to request other
-    properties (paths via rcsb_describe_data_object).
+    Default fields: description, weight, copy count, and the bound chemical component ID.
+    Use rcsb_get_chem_comps for the chemistry of that component.
+
+    Args:
+        entity_ids: entry + entity number, e.g. ["4HHB_3"]. Unknown IDs are returned
+            under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_nonpolymer_entity.pdbx_description") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("nonpolymer_entities"), then drill into
+            a nested object with into="rcsb_nonpolymer_entity" to list its leaves.
     """
     return await _query_batch("nonpolymer_entities", entity_ids, fields)
 
@@ -1872,8 +1899,14 @@ async def rcsb_get_branched_entities(entity_ids: list[str], fields: str | None =
     """Fetch branched (carbohydrate / oligosaccharide) entities, e.g. ["5FMB_2"].
 
     Default fields: description, weight, copy count, branch type, and component count.
-    Unknown IDs are returned under "not_found"; pass `fields` to request other
-    properties (paths via rcsb_describe_data_object).
+
+    Args:
+        entity_ids: entry + entity number, e.g. ["5FMB_2"]. Unknown IDs are returned
+            under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_branched_entity.pdbx_description") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("branched_entities"), then drill into a
+            nested object with into="rcsb_branched_entity" to list its leaves.
     """
     return await _query_batch("branched_entities", entity_ids, fields)
 
@@ -1883,8 +1916,14 @@ async def rcsb_get_polymer_entity_instances(instance_ids: list[str], fields: str
     """Fetch polymer entity instances (individual chains), e.g. ["4HHB.A"] (entry.asym_id).
 
     Default fields: the entry/entity/chain identifiers and modeled-residue count.
-    Unknown IDs are returned under "not_found"; pass `fields` to request other
-    properties (paths via rcsb_describe_data_object).
+
+    Args:
+        instance_ids: entry.asym_id (chain), e.g. ["4HHB.A"]. Unknown IDs are returned
+            under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_polymer_instance_info.modeled_residue_count") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("polymer_entity_instances"), then drill
+            into a nested object with into="rcsb_polymer_instance_info" to list its leaves.
     """
     return await _query_batch("polymer_entity_instances", instance_ids, fields)
 
@@ -1893,9 +1932,15 @@ async def rcsb_get_polymer_entity_instances(instance_ids: list[str], fields: str
 async def rcsb_get_nonpolymer_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer entity instances (individual bound ligands), e.g. ["4HHB.E"].
 
-    Default fields: the entry/entity/chain identifiers, bound component id, and author
-    seq id. Unknown IDs are returned under "not_found"; pass `fields` to request other
-    properties (paths via rcsb_describe_data_object).
+    Default fields: the entry/entity/chain identifiers, bound component id, and author seq id.
+
+    Args:
+        instance_ids: entry.asym_id, e.g. ["4HHB.E"]. Unknown IDs are returned under
+            "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_nonpolymer_entity_instance_container_identifiers.comp_id") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("nonpolymer_entity_instances"), then drill
+            into a nested object with into="rcsb_nonpolymer_entity_instance_container_identifiers" to list its leaves.
     """
     return await _query_batch("nonpolymer_entity_instances", instance_ids, fields)
 
@@ -1904,9 +1949,15 @@ async def rcsb_get_nonpolymer_entity_instances(instance_ids: list[str], fields: 
 async def rcsb_get_branched_entity_instances(instance_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch branched entity instances (individual glycan chains), e.g. ["5FMB.C"].
 
-    Default fields: the entry/entity/chain identifiers. Unknown IDs are returned under
-    "not_found"; pass `fields` to request other properties (paths via
-    rcsb_describe_data_object).
+    Default fields: the entry/entity/chain identifiers.
+
+    Args:
+        instance_ids: entry.asym_id (glycan chain), e.g. ["5FMB.C"]. Unknown IDs are
+            returned under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_branched_entity_instance_container_identifiers.asym_id") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("branched_entity_instances"), then drill
+            into a nested object with into="rcsb_branched_entity_instance_container_identifiers" to list its leaves.
     """
     return await _query_batch("branched_entity_instances", instance_ids, fields)
 
@@ -1915,9 +1966,15 @@ async def rcsb_get_branched_entity_instances(instance_ids: list[str], fields: st
 async def rcsb_get_assemblies(assembly_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch biological assemblies, e.g. ["4HHB-1"] (entry-assembly).
 
-    Default fields: composition counts and oligomeric state. Unknown IDs are returned
-    under "not_found"; pass `fields` to request other properties (paths via
-    rcsb_describe_data_object).
+    Default fields: composition counts and oligomeric state.
+
+    Args:
+        assembly_ids: entry-assembly, e.g. ["4HHB-1"]. Unknown IDs are returned under
+            "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_assembly_info.polymer_entity_instance_count") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("assemblies"), then drill into a
+            nested object with into="rcsb_assembly_info" to list its leaves.
     """
     return await _query_batch("assemblies", assembly_ids, fields)
 
@@ -1926,9 +1983,15 @@ async def rcsb_get_assemblies(assembly_ids: list[str], fields: str | None = None
 async def rcsb_get_interfaces(interface_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch assembly interfaces, e.g. ["1BMV-1.1"] (entry-assembly.interface).
 
-    Default fields: buried area, character, composition, residue count. Unknown IDs are
-    returned under "not_found"; pass `fields` to request other properties (paths via
-    rcsb_describe_data_object).
+    Default fields: buried area, character, composition, residue count.
+
+    Args:
+        interface_ids: entry-assembly.interface, e.g. ["1BMV-1.1"]. Unknown IDs are
+            returned under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_interface_info.interface_area") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("interfaces"), then drill into a
+            nested object with into="rcsb_interface_info" to list its leaves.
     """
     return await _query_batch("interfaces", interface_ids, fields)
 
@@ -1937,9 +2000,15 @@ async def rcsb_get_interfaces(interface_ids: list[str], fields: str | None = Non
 async def rcsb_get_chem_comps(comp_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch chemical components / ligands by their short codes, e.g. ["HEM", "ATP"].
 
-    Default fields: name, formula, weight, type, SMILES, InChIKey. Unknown IDs are
-    returned under "not_found"; pass `fields` to request other properties (paths via
-    rcsb_describe_data_object).
+    Default fields: name, formula, weight, type, SMILES, InChIKey.
+
+    Args:
+        comp_ids: chemical-component short codes, e.g. ["HEM", "ATP"]. Unknown IDs are
+            returned under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "chem_comp.name") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("chem_comps"), then drill into a
+            nested object with into="chem_comp" to list its leaves.
     """
     return await _query_batch("chem_comps", comp_ids, fields)
 
@@ -1948,9 +2017,15 @@ async def rcsb_get_chem_comps(comp_ids: list[str], fields: str | None = None) ->
 async def rcsb_get_entry_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch entry groups (clusters of related entries) by group ID.
 
-    Default fields: group name, description, member count, and member ids. Unknown IDs
-    are returned under "not_found"; pass `fields` to request other properties (paths via
-    rcsb_describe_data_object).
+    Default fields: group name, description, member count, and member ids.
+
+    Args:
+        group_ids: entry-group ids, e.g. ["G_1002266"]. Unknown IDs are returned under
+            "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_group_info.group_name") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("entry_groups"), then drill into a
+            nested object with into="rcsb_group_info" to list its leaves.
     """
     return await _query_batch("entry_groups", group_ids, fields)
 
@@ -1959,9 +2034,15 @@ async def rcsb_get_entry_groups(group_ids: list[str], fields: str | None = None)
 async def rcsb_get_polymer_entity_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entity groups (e.g. sequence clusters), e.g. ["85_70"].
 
-    Default fields: group name, description, member count, and member ids. Unknown IDs
-    are returned under "not_found"; pass `fields` to request other properties (paths via
-    rcsb_describe_data_object).
+    Default fields: group name, description, member count, and member ids.
+
+    Args:
+        group_ids: sequence-cluster group ids, e.g. ["85_70"]. Unknown IDs are returned
+            under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_group_info.group_name") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("polymer_entity_groups"), then drill into
+            a nested object with into="rcsb_group_info" to list its leaves.
     """
     return await _query_batch("polymer_entity_groups", group_ids, fields)
 
@@ -1970,9 +2051,15 @@ async def rcsb_get_polymer_entity_groups(group_ids: list[str], fields: str | Non
 async def rcsb_get_nonpolymer_entity_groups(group_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch non-polymer entity groups (clusters of related ligands) by group ID.
 
-    Default fields: group name, description, member count, and member ids. Unknown IDs
-    are returned under "not_found"; pass `fields` to request other properties (paths via
-    rcsb_describe_data_object).
+    Default fields: group name, description, member count, and member ids.
+
+    Args:
+        group_ids: non-polymer entity group ids, e.g. ["ATP"]. Unknown IDs are returned
+            under "not_found".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_group_info.group_name") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("nonpolymer_entity_groups"), then drill
+            into a nested object with into="rcsb_group_info" to list its leaves.
     """
     return await _query_batch("nonpolymer_entity_groups", group_ids, fields)
 
@@ -1990,7 +2077,15 @@ async def rcsb_get_uniprot(uniprot_id: str, fields: str | None = None) -> dict[s
     (kept out of the default because they can run to hundreds of entries):
     `rcsb_uniprot_annotation` (GO terms, InterPro, disease associations),
     `rcsb_uniprot_feature` (domains, sites, binding sites, sequence variants), and
-    `rcsb_uniprot_external_reference`. Discover exact paths with rcsb_describe_data_object.
+    `rcsb_uniprot_external_reference`.
+
+    Args:
+        uniprot_id: a UniProt accession, e.g. "P69905".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_uniprot_protein.name") or GraphQL braces, and may mix them
+            (see the heavier annotation sets above). Discover paths with
+            rcsb_describe_data_object("uniprot"), then drill into a nested object with
+            into="rcsb_uniprot_protein" to list its leaves.
     """
     return await _query_single("uniprot", uniprot_id, fields)
 
@@ -1999,8 +2094,13 @@ async def rcsb_get_uniprot(uniprot_id: str, fields: str | None = None) -> dict[s
 async def rcsb_get_pubmed(pubmed_id: int, fields: str | None = None) -> dict[str, Any]:
     """Fetch the PubMed record for a citation by its integer ID, e.g. 6726807.
 
-    Default fields: PubMed Central ID, DOI, abstract text. Pass `fields` to request
-    other properties (paths via rcsb_describe_data_object).
+    Default fields: PubMed Central ID, DOI, abstract text.
+
+    Args:
+        pubmed_id: integer PubMed ID, e.g. 6726807.
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths or GraphQL braces (this object is flat, e.g. "rcsb_pubmed_doi").
+            Discover paths with rcsb_describe_data_object("pubmed").
     """
     return await _query_single("pubmed", pubmed_id, fields)
 
@@ -2009,8 +2109,14 @@ async def rcsb_get_pubmed(pubmed_id: int, fields: str | None = None) -> dict[str
 async def rcsb_get_group_provenance(group_provenance_id: str, fields: str | None = None) -> dict[str, Any]:
     """Fetch provenance/method metadata for a grouping, e.g. "provenance_sequence_identity".
 
-    Default fields: the aggregation method/type and provenance id. Pass `fields` to
-    request other properties (paths via rcsb_describe_data_object).
+    Default fields: the aggregation method/type and provenance id.
+
+    Args:
+        group_provenance_id: a provenance token, e.g. "provenance_sequence_identity".
+        fields: Optional GraphQL selection set replacing the curated default; accepts
+            dotted paths (e.g. "rcsb_group_aggregation_method.type") or GraphQL braces, and may mix them.
+            Discover paths with rcsb_describe_data_object("group_provenance"), then drill into a
+            nested object with into="rcsb_group_aggregation_method" to list its leaves.
     """
     return await _query_single("group_provenance", group_provenance_id, fields)
 
