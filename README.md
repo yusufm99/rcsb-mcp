@@ -84,10 +84,10 @@ Unknown IDs are reported under `not_found`.
 | `rcsb_get_group_provenance` | Grouping provenance (single) | `"provenance_sequence_identity"` |
 | `rcsb_data_graphql` | Escape hatch: run any GraphQL query against the Data API. | —                                |
 
-The Search API only returns identifiers, so the search tools optionally
-**enrich** entry hits with metadata. Enrichment and all Data API tools query
-the GraphQL endpoint, batching every requested ID into one request. All 18
-typed tools are generated from a single registry in
+The Search API only returns identifiers, so a search is the first step: batch the
+returned ids into the matching `rcsb_get_*` tool to fetch titles, organisms, and
+other metadata (these tools query the GraphQL endpoint, batching every requested ID
+into one request). All 18 typed tools are generated from a single registry in
 [`queries.py`](src/rcsb_mcp/queries.py) (`DATA_OBJECTS`), so adding a field or
 endpoint is a one-line change.
 

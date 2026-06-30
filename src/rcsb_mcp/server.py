@@ -9,9 +9,9 @@ Spans three RCSB APIs so an LLM can take a question from discovery through detai
   systems (UniProt, NCBI, PDB entity/instance) via the Sequence Coordinates API
   (https://sequence-coordinates.rcsb.org/graphql).
 
-The Search API returns only identifiers, so search tools optionally enrich entry
-hits with metadata from the Data API, and an entry's component ids let the agent
-drill top-down into its entities, assemblies, and ligands.
+The Search API returns only identifiers, so a search is the first step: batch the
+returned ids into the matching Data API tool for metadata, and an entry's component
+ids let the agent drill top-down into its entities, assemblies, and ligands.
 
 Run locally (stdio, for Claude Desktop / MCP Inspector):
     python -m rcsb_mcp.server
@@ -298,9 +298,9 @@ Return types and fetching details:
     polymer_instance   one chain            "4HHB.A"   -> rcsb_get_polymer_entity_instances
     assembly           biological assembly  "4HHB-1"   -> rcsb_get_assemblies
     mol_definition     chemical component   "HEM"      -> rcsb_get_chem_comps
-- The search tools' `enrich` flag auto-attaches entry metadata ONLY when return_type="entry".
-  For any other return_type, take the returned ids and call the matching rcsb_get_* tool above
-  (batch all ids into a single call) to get details — do not loop one id at a time.
+- Search responses carry identifiers + scores ONLY — no titles, organisms, or other metadata.
+  To present or reason about hits, take the returned ids and call the matching rcsb_get_* tool
+  above (batch ALL ids into a single call) to get details — do not loop one id at a time.
 - The rcsb_get_* and rcsb_seqcoord_* tools return a compact default field set. If you need a property
   they don't return, call rcsb_describe_data_object (Data API) or rcsb_describe_seqcoord_object
   (Sequence Coordinates) with [into=, query=] to find the exact field path, then pass it to
@@ -584,58 +584,8 @@ async def _query_single(
     return {**node, "graphiql_url": _graphiql_url(DATA_GRAPHIQL_URL, body)}
 
 
-def _entry_summary(node: dict[str, Any]) -> dict[str, Any]:
-    """Compact, flat summary for one CoreEntry node (used to enrich search hits)."""
-    info = node.get("rcsb_entry_info") or {}
-    resolutions = info.get("resolution_combined") or []
-    return {
-        "id": node.get("rcsb_id"),
-        "title": (node.get("struct") or {}).get("title"),
-        "experimental_method": (node.get("exptl") or [{}])[0].get("method"),
-        "resolution_A": resolutions[0] if resolutions else None,
-        "deposited": (node.get("rcsb_accession_info") or {}).get("deposit_date"),
-    }
-
-
-async def _fetch_entry_summaries(pdb_ids: list[str]) -> list[dict[str, Any]]:
-    """Batch-fetch flat entry summaries via GraphQL, one result per requested id.
-
-    The API drops unknown ids from its response, so we map returned nodes back
-    by id and fill an explicit "not found" for any that are missing.
-    """
-    ids = [pid.strip().upper() for pid in pdb_ids if pid.strip()]
-    if not ids:
-        return []
-    nodes = await _graphql_field(queries.build_data_query("entries", ids), "entries") or []
-    by_id = {
-        str(n.get("rcsb_id", "")).upper(): _entry_summary(n) for n in nodes if n is not None
-    }
-    return [by_id.get(pid, {"id": pid, "error": "not found"}) for pid in ids]
-
-
-async def _enrich(identifiers: list[str], limit: int = 25) -> list[dict[str, Any]]:
-    """Fetch entry metadata for a list of identifiers in a single GraphQL request."""
-    # Only top-level entry IDs can be enriched as entries; entity/assembly IDs
-    # look like "1ABC_1" / "1ABC-1", so strip the suffix and de-duplicate.
-    entry_ids: list[str] = []
-    seen: set[str] = set()
-    for ident in identifiers[:limit]:
-        base = ident.split("_")[0].split("-")[0]
-        if base not in seen:
-            seen.add(base)
-            entry_ids.append(base)
-    if not entry_ids:
-        return []
-    try:
-        return await _fetch_entry_summaries(entry_ids)
-    except (httpx.HTTPError, ValueError, RuntimeError) as exc:
-        # Enrichment is best-effort: never fail the search because of it.
-        return [{"id": pid, "error": str(exc)} for pid in entry_ids]
-
-
 def _format(
     raw: dict[str, Any],
-    enriched: list[dict[str, Any]] | None,
     body: dict[str, Any] | None = None,
     offset: int | None = None,
 ) -> dict[str, Any]:
@@ -653,8 +603,6 @@ def _format(
         result["has_more"] = has_more
         result["next_offset"] = offset + len(hits) if has_more else None
     result["hits"] = hits
-    if enriched is not None:
-        result["details"] = enriched
     if body is not None:
         result["query_editor_url"] = _search_editor_url(body)
     return result
@@ -754,7 +702,6 @@ async def rcsb_search_fulltext(
     offset: Offset = 0,
     all_hits: bool = False,
     include_computed_models: bool = False,
-    enrich: bool = True,
     chemical: bool = False,
     facets: list[dict[str, Any]] | None = None,
     sort_by: str | None = None,
@@ -792,10 +739,10 @@ async def rcsb_search_fulltext(
     combine these as needed to search for multimeric structures.
 
     Matching spans ALL text annotations, so a hit may be a spurious keyword match rather than a
-    real answer. After searching, JUDGE each hit's relevance yourself: read its title (in
-    `details` when enrich=True) and, for borderline cases, fetch its PubMed abstract
-    (rcsb_get_entries -> pubmed.rcsb_pubmed_abstract_text); decide whether that text actually
-    supports the user's question, and treat a low `score` as only a weak hint.
+    real answer. The response carries identifiers + scores only, so after searching, JUDGE each
+    hit's relevance yourself: fetch its title (and, for borderline cases, its PubMed abstract)
+    with rcsb_get_entries (-> struct.title / pubmed.rcsb_pubmed_abstract_text); decide whether
+    that text actually supports the user's question, and treat a low `score` as only a weak hint.
 
     Args:
         query: Free-text terms matched (case-insensitively) against all text annotations.
@@ -818,10 +765,8 @@ async def rcsb_search_fulltext(
         all_hits: Return the COMPLETE result set in one call, for an explicit "ALL ..."
             request. Ignores limit and omits the paging fields; can't be combined with
             offset (the Search API rejects pagination here). Refused above 10000 hits —
-            narrow the query, aggregate by passing `facets`, or page instead. enrich
-            still annotates only the first 25 hits.
+            narrow the query, aggregate by passing `facets`, or page instead.
         include_computed_models: Also search computed structure models (AlphaFold etc.).
-        enrich: If true, attach title/method/resolution for each entry hit.
         chemical: Set True when `attributes` target chemical-component attributes (the
             text_chem service; usually pair with return_type="mol_definition").
         facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
@@ -840,7 +785,8 @@ async def rcsb_search_fulltext(
             there). Omit for RCSB's default.
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
-        query_editor_url}; "details" (per-entry title/method/resolution) is added when enrich.
+        query_editor_url}. Hits are identifiers only — batch them into rcsb_get_entries
+        (or the rcsb_get_* tool matching return_type) for titles and other metadata.
         With all_hits, the offset/has_more/next_offset paging fields are omitted. With `facets`,
         instead returns {total_count, facets, query_editor_url}.
     """
@@ -865,9 +811,7 @@ async def rcsb_search_fulltext(
     raw = await _post_search(body)
     if facets:
         return _format_facets(raw, body)
-    ids = [r["identifier"] for r in raw.get("result_set", [])]
-    enriched = await _enrich(ids) if (enrich and return_type == "entry" and ids) else None
-    return _format(raw, enriched, body, None if all_hits else offset)
+    return _format(raw, body, None if all_hits else offset)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -1257,7 +1201,6 @@ async def rcsb_search_by_attribute(
     limit: Limit = 10,
     offset: Offset = 0,
     all_hits: bool = False,
-    enrich: bool = True,
     group_by: GroupBy | None = None,
     group_by_ranking: GroupByRanking | None = None,
     chemical: bool = False,
@@ -1310,9 +1253,7 @@ async def rcsb_search_by_attribute(
         all_hits: Return the COMPLETE result set in one call, for an explicit "ALL ..."
             request. Ignores limit and omits the paging fields; can't be combined with
             offset (the Search API rejects pagination here). Refused above 10000 hits —
-            narrow the query, aggregate by passing `facets`, or page instead. enrich
-            still annotates only the first 25 hits.
-        enrich: Attach entry metadata when return_type is "entry".
+            narrow the query, aggregate by passing `facets`, or page instead.
         group_by: Collapse redundant polymer_entity hits into clusters, returning one
             representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
             (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
@@ -1330,7 +1271,8 @@ async def rcsb_search_by_attribute(
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
-        query_editor_url}; "details" (per-entry title/method/resolution) is added when enrich.
+        query_editor_url}. Hits are identifiers only — batch them into rcsb_get_entries
+        (or the rcsb_get_* tool matching return_type) for titles and other metadata.
         With all_hits, the offset/has_more/next_offset paging fields are omitted. With `facets`,
         instead returns {total_count, facets, query_editor_url}.
     """
@@ -1352,9 +1294,7 @@ async def rcsb_search_by_attribute(
     raw = await _post_search(body)
     if facets:
         return _format_facets(raw, body)
-    ids = [r["identifier"] for r in raw.get("result_set", [])]
-    enriched = await _enrich(ids) if (enrich and return_type == "entry" and ids) else None
-    return _format(raw, enriched, body, None if all_hits else offset)
+    return _format(raw, body, None if all_hits else offset)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -1428,7 +1368,7 @@ async def rcsb_search_by_sequence(
     raw = await _post_search(body)
     if facets:
         return _format_facets(raw, body)
-    return _format(raw, None, body, None if all_hits else offset)
+    return _format(raw, body, None if all_hits else offset)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -1515,7 +1455,7 @@ async def rcsb_search_by_chemical(
     raw = await _post_search(body)
     if facets:
         return _format_facets(raw, body)
-    return _format(raw, None, body, None if all_hits else offset)
+    return _format(raw, body, None if all_hits else offset)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -1592,7 +1532,7 @@ async def rcsb_search_by_structure(
     raw = await _post_search(body)
     if facets:
         return _format_facets(raw, body)
-    return _format(raw, None, body, None if all_hits else offset)
+    return _format(raw, body, None if all_hits else offset)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -1667,7 +1607,7 @@ async def rcsb_search_by_seqmotif(
     raw = await _post_search(body)
     if facets:
         return _format_facets(raw, body)
-    return _format(raw, None, body, None if all_hits else offset)
+    return _format(raw, body, None if all_hits else offset)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -1700,7 +1640,7 @@ async def rcsb_search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
           "return_type": "polymer_entity"}
     """
     raw = await _post_search(query_body)
-    return _format(raw, None, query_body)
+    return _format(raw, query_body)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -1803,7 +1743,7 @@ async def rcsb_search_strucmotif(
     raw = await _post_search(body)
     if facets:
         return _format_facets(raw, body)
-    return _format(raw, None, body, None if all_hits else offset)
+    return _format(raw, body, None if all_hits else offset)
 
 
 # --------------------------------------------------------------------------- #
