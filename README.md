@@ -154,9 +154,171 @@ answer real PDB questions. See [`evals/README.md`](evals/README.md) to run it.
 
 ## Connect to Claude Desktop
 
-Edit `claude_desktop_config.json`:
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+### Windows — plain `uv` setup
+
+This method uses the full path to `uv.exe`, which avoids Windows PATH issues in
+Claude Desktop.
+
+#### 1. Install `uv`
+
+Open PowerShell:
+
+```powershell
+winget install --id astral-sh.uv -e --accept-package-agreements --accept-source-agreements
+```
+
+Close and reopen PowerShell, then verify:
+
+```powershell
+uv --version
+```
+
+#### 2. Install Python
+
+```powershell
+uv python install 3.12
+```
+
+#### 3. Find the full path to `uv.exe`
+
+```powershell
+$UV = (Get-Command uv -ErrorAction Stop).Source
+$UV
+```
+
+Copy the path that is printed. It will look similar to:
+
+```text
+C:\Users\<USERNAME>\AppData\Local\Microsoft\WinGet\Packages\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\uv.exe
+```
+
+#### 4. Verify that `rcsb-mcp` can load
+
+```powershell
+uv tool run --python 3.12 --from "rcsb-mcp==0.3.0" python -c "import rcsb_mcp.server; print('RCSB MCP import OK')"
+```
+
+Expected output:
+
+```text
+RCSB MCP import OK
+```
+
+#### 5. Configure Claude Desktop
+
+In Claude Desktop, open:
+
+```text
+Settings → Developer → Edit Config
+```
+
+Edit `claude_desktop_config.json` and add:
+
+```json
+{
+  "mcpServers": {
+    "rcsb-mcp": {
+      "command": "C:\\FULL\\PATH\\TO\\uv.exe",
+      "args": [
+        "tool",
+        "run",
+        "--python",
+        "3.12",
+        "--from",
+        "rcsb-mcp==0.3.0",
+        "rcsb-mcp"
+      ]
+    }
+  }
+}
+```
+
+Replace `C:\\FULL\\PATH\\TO\\uv.exe` with the path printed by:
+
+```powershell
+(Get-Command uv).Source
+```
+
+JSON paths must use doubled backslashes.
+
+Example:
+
+```json
+{
+  "mcpServers": {
+    "rcsb-mcp": {
+      "command": "C:\\Users\\example\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe",
+      "args": [
+        "tool",
+        "run",
+        "--python",
+        "3.12",
+        "--from",
+        "rcsb-mcp==0.3.0",
+        "rcsb-mcp"
+      ]
+    }
+  }
+}
+```
+
+#### 6. Restart Claude Desktop
+
+Fully quit Claude Desktop and reopen it.
+
+Then verify the server under:
+
+```text
+Settings → Developer → Local MCP servers
+```
+
+`rcsb-mcp` should show a `running` status.
+
+Use Claude's **Chat** mode to access the tools.
+
+#### 7. Test the connection
+
+Start a new Claude chat and enter:
+
+```text
+You must use the connected rcsb-mcp tools rather than answering from memory.
+
+Fetch PDB entry 4HHB, identify the polymer entity corresponding to the beta
+subunit, and map that entity to UniProt.
+
+State:
+1. The beta-subunit polymer entity ID
+2. The UniProt accession
+3. The MCP tools you called
+```
+
+Expected result:
+
+```text
+Polymer entity: 4HHB_2
+UniProt accession: P68871
+```
+
+Claude should call tools including:
+
+- `rcsb_get_entries`
+- `rcsb_get_polymer_entities`
+- `rcsb_seqcoord_alignments`
+
+> **Note:** Running `rcsb-mcp` manually in PowerShell starts a stdio server that
+> waits for an MCP client. Pressing `Ctrl+C` may produce a `CancelledError` or
+> `KeyboardInterrupt` traceback. This is a normal manual shutdown, not a server
+> installation failure.
+
+### macOS or Linux
+
+Run the published package directly:
+
+```bash
+uvx rcsb-mcp
+```
+
+Configure Claude Desktop:
 
 ```json
 {
@@ -169,7 +331,7 @@ Edit `claude_desktop_config.json`:
 }
 ```
 
-For a local source checkout, point at the module instead:
+For a local source checkout:
 
 ```json
 {
@@ -183,7 +345,117 @@ For a local source checkout, point at the module instead:
 }
 ```
 
-Restart Claude Desktop. The tools appear under the connectors (plug) icon.
+Restart Claude Desktop. The tools appear under the connectors/tools interface.
+
+## Connect to Codex Desktop on Windows
+
+The Codex desktop app can use local MCP servers through:
+
+```text
+%USERPROFILE%\.codex\config.toml
+```
+
+The Codex CLI is not required for this setup.
+
+### 1. Find `uv.exe`
+
+In PowerShell:
+
+```powershell
+(Get-Command uv -ErrorAction Stop).Source
+```
+
+Copy the complete path that is printed.
+
+### 2. Open the Codex configuration
+
+Fully close Codex Desktop, then run:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.codex" | Out-Null
+notepad "$HOME\.codex\config.toml"
+```
+
+If the file already contains settings, keep them and add the following section at
+the bottom:
+
+```toml
+[mcp_servers.rcsb-mcp]
+command = 'C:\FULL\PATH\TO\uv.exe'
+args = [
+    "tool",
+    "run",
+    "--python",
+    "3.12",
+    "--from",
+    "rcsb-mcp==0.3.0",
+    "rcsb-mcp"
+]
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+enabled = true
+```
+
+Replace `C:\FULL\PATH\TO\uv.exe` with the path returned by PowerShell.
+
+The path is enclosed in single quotes so Windows backslashes do not need to be
+escaped.
+
+Example:
+
+```toml
+[mcp_servers.rcsb-mcp]
+command = 'C:\Users\example\AppData\Local\Microsoft\WinGet\Packages\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\uv.exe'
+args = [
+    "tool",
+    "run",
+    "--python",
+    "3.12",
+    "--from",
+    "rcsb-mcp==0.3.0",
+    "rcsb-mcp"
+]
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+enabled = true
+```
+
+Save the file and reopen Codex Desktop.
+
+### 3. Test the connection
+
+Start a new Codex chat and enter:
+
+```text
+You must use the connected rcsb-mcp tools rather than answering from memory.
+
+Fetch PDB entry 4HHB, identify the polymer entity corresponding to the beta
+subunit, and map that entity to UniProt.
+
+State:
+1. The beta-subunit polymer entity ID
+2. The UniProt accession
+3. The MCP tools you called
+```
+
+Expected result:
+
+```text
+Polymer entity: 4HHB_2
+UniProt accession: P68871
+```
+
+Codex should call:
+
+- `rcsb_get_entries`
+- `rcsb_get_polymer_entities`
+- `rcsb_seqcoord_alignments`
+
+A successful second test is:
+
+```text
+Find all IHM structures in the PDB using the connected rcsb-mcp tools.
+```
 
 ## Example prompts
 
