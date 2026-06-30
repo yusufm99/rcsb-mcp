@@ -804,14 +804,13 @@ DATA_OBJECTS: dict[str, DataObject] = {
         "rcsb_accession_info{deposit_date initial_release_date} "
         "rcsb_entry_container_identifiers{polymer_entity_ids non_polymer_entity_ids "
         "branched_entity_ids assembly_ids} "
-        "rcsb_primary_citation{title rcsb_journal_abbrev year pdbx_database_id_DOI} "
-        "pubmed{rcsb_pubmed_abstract_text}",
+        "rcsb_primary_citation{title rcsb_journal_abbrev year pdbx_database_id_DOI}",
     ),
     "polymer_entities": DataObject(
         "polymer_entities", "entity_ids", True, "String",
         'polymer entity IDs (entry_entity), e.g. "4HHB_1"',
         "rcsb_id rcsb_polymer_entity{pdbx_description formula_weight pdbx_number_of_molecules} "
-        "entity_poly{type rcsb_sample_sequence_length pdbx_seq_one_letter_code_can} "
+        "entity_poly{type rcsb_sample_sequence_length} "
         "rcsb_entity_source_organism{ncbi_scientific_name ncbi_taxonomy_id}",
     ),
     "nonpolymer_entities": DataObject(

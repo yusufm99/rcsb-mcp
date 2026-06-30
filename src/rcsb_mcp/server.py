@@ -1805,7 +1805,7 @@ async def rcsb_describe_data_object(
 @mcp.tool(annotations=READ_ONLY)
 async def rcsb_get_entries(entry_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch metadata for one or more PDB entries (title, method, resolution, size,
-    dates, primary citation, and publication abstract).
+    dates, and primary citation).
 
     The response also lists the entry's component ids under
     rcsb_entry_container_identifiers — use these to drill into the structure. They are
@@ -1863,7 +1863,7 @@ async def rcsb_get_entry_exp_info(entry_ids: list[str], fields: str | None = Non
 async def rcsb_get_polymer_entities(entity_ids: list[str], fields: str | None = None) -> dict[str, Any]:
     """Fetch polymer entities (protein/nucleic-acid molecules).
 
-    Default fields: description, sequence, length, weight, and source organism.
+    Default fields: description, length, weight, and source organism.
 
     Args:
         entity_ids: entry + entity number, e.g. ["4HHB_1"] — exactly what
