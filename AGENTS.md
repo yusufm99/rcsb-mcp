@@ -78,7 +78,11 @@ After validating, add/adjust the default and re-run `test_queries.py`.
 ## Gotchas
 
 - **GraphQL endpoints return HTTP 200 even on query errors** — the error is in the
-  `errors` array, not the status code. `_graphql_field` already raises on it.
+  `errors` array, not the status code. `_graphql_field` already raises on it, and
+  `_enrich_field_errors` rewrites an undefined-field error (a bad `fields=` guess) into a
+  self-correcting hint: where that field actually lives + the discovery tool. Keep that
+  enrichment OUT of the model-facing `instructions` — telling the model wrong guesses get
+  auto-corrected would undercut the "discover fields first, don't invent them" rule.
 - **ID case sensitivity.** Entry/entity/chem ids are upper-cased; group and
   `group_provenance` ids are case-sensitive opaque tokens (the `upper=False` flag in
   `DATA_OBJECTS`). Don't blanket-uppercase.

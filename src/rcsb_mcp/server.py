@@ -19,7 +19,9 @@ Run locally (stdio, for Claude Desktop / MCP Inspector):
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
+import re
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
@@ -444,11 +446,16 @@ async def _get_json(url: str, params: dict[str, Any], service: str) -> dict[str,
 
 
 async def _graphql_field(body: dict[str, Any], field: str, url: str = DATA_GRAPHQL_URL) -> Any:
-    """Run a builder's GraphQL body and return data[field] (dict/list/None), raising on errors."""
+    """Run a builder's GraphQL body and return data[field] (dict/list/None), raising on errors.
+
+    An undefined-field error (from a bad `fields=` selection) is enriched with where that field
+    actually lives in the schema plus the discovery tool, so a wrong guess becomes one guided fix
+    rather than blind retry (see _enrich_field_errors). Other errors pass through verbatim.
+    """
     payload = await _post_graphql(body["query"], body.get("variables"), url=url)
     if payload.get("errors"):
         msgs = "; ".join(e.get("message", "") for e in payload["errors"])
-        raise RuntimeError(f"RCSB GraphQL error: {msgs}")
+        raise RuntimeError(f"RCSB GraphQL error: {await _enrich_field_errors(msgs, field, url)}")
     return (payload.get("data") or {}).get(field)
 
 
@@ -623,6 +630,62 @@ async def _flatten_object_fields(
                     nxt.append((d["type"], path, ancestors | {d["type"]}, depth + 1))
         level = nxt
     return results, False
+
+
+# --- Field-error enrichment: turn a raw GraphQL "FieldUndefined" into a self-correcting hint --- #
+# graphql-java validation message, e.g. "Field 'rcsb_entity_source_organism' in type 'CoreEntry'
+# is undefined". This is the choke point that catches a bad `fields=` guess (the schema has no
+# interfaces/unions/args, so an undefined field is always a genuine mistake, never ambiguity).
+_FIELD_UNDEFINED_RE = re.compile(r"Field '([^']+)' in type '([^']+)' is undefined")
+# Reverse the DATA_OBJECTS registry so an error carrying a root field can name the object_key to
+# fix it with (currently an identity map, but kept derived so it stays correct if they diverge).
+_ROOT_FIELD_TO_OBJECT_KEY = {spec.root_field: key for key, spec in queries.DATA_OBJECTS.items()}
+
+
+async def _enrich_field_errors(msgs: str, root_field: str, url: str) -> str:
+    """Rewrite a GraphQL undefined-field error into an actionable, self-correcting message.
+
+    For each undefined field named in `msgs`, add (best-effort) where that field actually lives in
+    the schema and a close-name suggestion on the offending type, then steer to the field-discovery
+    tool — so a wrong `fields=` guess becomes one guided fix instead of blind retry. Returns the
+    original `msgs` unchanged for non-field errors, or if schema introspection is unavailable.
+    """
+    undefined = _FIELD_UNDEFINED_RE.findall(msgs)
+    if not undefined:
+        return msgs
+    is_data = url == DATA_GRAPHQL_URL
+    example = undefined[0][0]
+    discover = (
+        f'rcsb_list_data_fields("{_ROOT_FIELD_TO_OBJECT_KEY.get(root_field, root_field)}", '
+        f'query="{example}")' if is_data
+        else f'rcsb_describe_seqcoord_object("{root_field}", query="{example}")'
+    )
+    try:
+        root_type = (await _root_field_types(url)).get(root_field)
+    except Exception:
+        root_type = None
+    hints: list[str] = []
+    for field_name, type_name in undefined[:3]:  # cap so the message stays readable
+        parts = [f"Field '{field_name}' is not defined on type '{type_name}'."]
+        try:  # close-name suggestion (typo) among the offending type's real fields
+            siblings = [f.get("name") for f in await _type_fields(type_name, url)]
+            close = difflib.get_close_matches(field_name, [s for s in siblings if s], n=3, cutoff=0.7)
+            if close:
+                parts.append("Did you mean: " + ", ".join(close) + "?")
+        except Exception:
+            pass
+        if root_type:  # relocation: where this exact field name lives under the root object
+            try:
+                found, _ = await _flatten_object_fields(root_type, url, 3, field_name, 50)
+                elsewhere = [f["path"] for f in found if f["path"].split(".")[-1] == field_name][:5]
+                if elsewhere:
+                    parts.append("It exists in the schema at: " + ", ".join(elsewhere) + ".")
+            except Exception:
+                pass
+        hints.append(" ".join(parts))
+    return (" ".join(hints)
+            + f" Discover valid paths with {discover}, then pass verified paths to `fields=` "
+              "(never guess field names).")
 
 
 async def _query_batch(

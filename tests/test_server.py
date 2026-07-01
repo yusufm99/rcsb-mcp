@@ -131,6 +131,67 @@ def test_field_descriptor_shape():
     print("ok: field descriptor shape")
 
 
+# --- _enrich_field_errors: raw GraphQL FieldUndefined -> self-correcting hint ------------- #
+def _enrich(msgs, root_field="entries", url=None):
+    """Run the enricher with the synthetic schema + a fake root-field->type resolver."""
+    url = url or server.DATA_GRAPHQL_URL
+
+    async def fake_type_fields(type_name, u=None):
+        return _SCHEMA.get(type_name, [])
+
+    async def fake_root_types(u=None):
+        return {"entries": "CoreEntry", "alignments": "CoreEntry"}
+
+    orig_tf, orig_rt = server._type_fields, server._root_field_types
+    server._type_fields = fake_type_fields
+    server._root_field_types = fake_root_types
+    try:
+        return asyncio.run(server._enrich_field_errors(msgs, root_field, url))
+    finally:
+        server._type_fields, server._root_field_types = orig_tf, orig_rt
+
+
+def test_enrich_relocation():
+    # a field placed on the wrong type is relocated to where it actually lives.
+    out = _enrich("Field 'rcsb_pubmed_abstract_text' in type 'CoreEntry' is undefined")
+    assert "not defined on type 'CoreEntry'" in out
+    assert "pubmed.rcsb_pubmed_abstract_text" in out                 # correct path surfaced
+    assert 'rcsb_list_data_fields("entries", query="rcsb_pubmed_abstract_text")' in out
+    print("ok: enrich relocation")
+
+
+def test_enrich_sibling_typo():
+    out = _enrich("Field 'titel' in type 'Struct' is undefined")
+    assert "Did you mean: title?" in out
+    assert "It exists in the schema at" not in out                   # no spurious relocation
+    print("ok: enrich sibling typo")
+
+
+def test_enrich_passthrough_non_field():
+    # a non-FieldUndefined error is returned verbatim (nothing to correct).
+    raw = "Some syntax error near '}'"
+    assert _enrich(raw) == raw
+    print("ok: enrich passthrough")
+
+
+def test_enrich_unknown_field():
+    # a pure hallucination still gets the discovery steer, but no false relocation/typo hint.
+    out = _enrich("Field 'totally_made_up' in type 'CoreEntry' is undefined")
+    assert "not defined on type 'CoreEntry'" in out
+    assert "It exists in the schema at" not in out and "Did you mean" not in out
+    assert 'rcsb_list_data_fields("entries", query="totally_made_up")' in out
+    print("ok: enrich unknown field")
+
+
+def test_enrich_seqcoord_steer():
+    # on the Sequence Coordinates endpoint the steer names the seqcoord discovery tool.
+    out = _enrich("Field 'foo' in type 'CoreEntry' is undefined",
+                  root_field="alignments", url=server.SEQCOORD_GRAPHQL_URL)
+    assert 'rcsb_describe_seqcoord_object("alignments"' in out
+    assert "rcsb_list_data_fields" not in out
+    print("ok: enrich seqcoord steer")
+
+
 if __name__ == "__main__":
     test_flatten_depth_and_traversal()
     test_flatten_cycle_guard()
@@ -138,4 +199,9 @@ if __name__ == "__main__":
     test_flatten_keyword_filter()
     test_flatten_result_cap()
     test_field_descriptor_shape()
+    test_enrich_relocation()
+    test_enrich_sibling_typo()
+    test_enrich_passthrough_non_field()
+    test_enrich_unknown_field()
+    test_enrich_seqcoord_steer()
     print("\nAll server tests passed.")
