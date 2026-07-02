@@ -66,6 +66,32 @@ with a short label and its editor link, e.g.:
 This satisfies the "indicate all the RCSB PDB APIs used" and "all the search attributes
 and conditions used" requirements above, and makes the agent's workflow auditable.
 
+## Source Provenance (highlight information not from the MCP tools)
+
+Every factual claim should come from RCSB PDB MCP tool output. When you nonetheless add
+content that is **not** sourced from a tool response — your own domain knowledge, general
+biological/chemical/medical context, interpretation, or inference — visually distinguish it
+so the reader can tell curated PDB data from model-supplied context.
+
+* Wrap every non-tool-sourced piece of text in a span with a single, clearly distinct color,
+  applied consistently across the whole report — the results table's **Additional
+  Information** column, summaries, and interpretation paragraphs alike. Tool-sourced values
+  keep the default text color; never color a value retrieved from a tool.
+* If an entire sentence or paragraph is model-supplied, wrap the whole block.
+* Include a short legend near the top of the page explaining the coding, so the color is
+  self-documenting.
+
+```html
+<style>.non-tool-source { color: #b45309; }</style>
+<p class="legend">
+  <span class="non-tool-source">Highlighted text</span> is context supplied by the
+  assistant, not retrieved from the RCSB PDB MCP tools.
+</p>
+...
+<td>Thr315 gatekeeper residue
+  <span class="non-tool-source">commonly associated with imatinib resistance</span></td>
+```
+
 ## Query-Specific Information
 
 Adapt the content of the **Additional Information** column to the user's question. Examples include:
@@ -89,7 +115,9 @@ Adapt the content of the **Additional Information** column to the user's questio
 * Ground every fact in tool output. Searches return only identifiers + scores, so fetch every value you display with a `rcsb_get_*` tool — e.g. title/method/resolution from `rcsb_get_entries`, organism from `rcsb_get_polymer_entities`. Never invent or guess PDB IDs, resolutions, organisms, citations, or ligands; if a value can't be fetched, show "NA".
 * Verify full-text relevance. Results from the `query` keyword of `rcsb_search_fulltext` are matches across all text annotations and can include false positives. For these, read each hit's title — and, when the title is inconclusive, its PubMed abstract (`rcsb_get_entries` → `pubmed.rcsb_pubmed_abstract_text`) — and use your judgment to confirm it genuinely answers the user's question. Drop or flag likely false positives, and present borderline matches as tentative rather than certain. (Structured `rcsb_search_by_attribute` results are precise and don't need this check.)
 * Use MCP search results whenever available and relevant.
-* Combine retrieved data with biological or structural context when useful.
+* Combine retrieved data with biological or structural context when useful — but any such
+  statement not grounded in a tool response (your own domain knowledge, interpretation, or
+  inference) must be visually distinguished per **Source Provenance** above.
 * If metadata is unavailable, display "NA".
 * If no matching structures are found, clearly state this and explain any relevant limitations of the search.
 * For broad searches, provide a short summary above the table describing the results.
