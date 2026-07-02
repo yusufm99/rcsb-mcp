@@ -192,6 +192,16 @@ def test_enrich_seqcoord_steer():
     print("ok: enrich seqcoord steer")
 
 
+def test_enrich_syntax_error():
+    # a malformed selection (ANTLR/parse error) gets the accepted format + a discovery steer.
+    raw = "Invalid syntax with ANTLR error 'token recognition error at: '.t'' at line 1 column 70"
+    out = _enrich(raw)
+    assert raw in out                                   # keep the original diagnostic
+    assert "`fields=`" in out and "separated by spaces or commas" in out
+    assert 'rcsb_list_data_fields("entries"' in out
+    print("ok: enrich syntax error")
+
+
 if __name__ == "__main__":
     test_flatten_depth_and_traversal()
     test_flatten_cycle_guard()
@@ -204,4 +214,5 @@ if __name__ == "__main__":
     test_enrich_passthrough_non_field()
     test_enrich_unknown_field()
     test_enrich_seqcoord_steer()
+    test_enrich_syntax_error()
     print("\nAll server tests passed.")

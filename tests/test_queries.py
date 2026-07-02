@@ -470,6 +470,19 @@ def test_normalize_fields():
     assert nf("a.b.c") == "a { b { c } }"
     # mix of plain names, dotted paths, and existing braces all normalize together
     assert nf("rcsb_id struct.title exptl{method}") == "rcsb_id struct { title } exptl { method }"
+    # commas separate paths too (GraphQL treats them as insignificant whitespace), so an
+    # agent's comma-separated list expands instead of hitting an ANTLR syntax error.
+    assert nf("struct.title, exptl.method") == "struct { title } exptl { method }"
+    assert nf("a.b,c.d") == "a { b } c { d }"          # no space after comma
+    assert nf("a.b, a.c") == "a { b c }"               # comma + shared prefix still merges
+    assert nf("struct.title , exptl.method ,") == "struct { title } exptl { method }"  # loose/trailing
+    # the exact multi-field comma string the agent sent now expands (was an ANTLR error)
+    agent_commas = ("struct.title, exptl.method, rcsb_entry_info.resolution_combined, "
+                    "rcsb_entry_container_identifiers.polymer_entity_ids, "
+                    "rcsb_entry_container_identifiers.entry_id, pdbx_database_related.details")
+    out = nf(agent_commas)
+    assert "." not in out, out
+    assert "rcsb_entry_container_identifiers { polymer_entity_ids entry_id }" in out
     # no dots -> returned verbatim (valid GraphQL / plain names left untouched)
     assert nf("rcsb_id struct{title}") == "rcsb_id struct{title}"
     assert nf("rcsb_id") == "rcsb_id"

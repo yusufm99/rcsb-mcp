@@ -933,9 +933,10 @@ def _normalize_fields(fields: str | None) -> str | None:
     (e.g. "rcsb_polymer_entity.pdbx_description"), so agents naturally write the
     same into the Data API `fields` override — but GraphQL needs nested braces
     ("rcsb_polymer_entity { pdbx_description }") and rejects the dot with a syntax
-    error. This normalizes both dialects: each whitespace-separated path is
-    expanded ("a.b.c" -> "a { b { c } }") and shared prefixes are merged, while
-    already-braced input passes through re-serialized.
+    error. This normalizes both dialects: each path (separated by whitespace and/or
+    commas — GraphQL treats commas as insignificant, and agents naturally write a
+    comma-separated list) is expanded ("a.b.c" -> "a { b { c } }") and shared
+    prefixes are merged, while already-braced input passes through re-serialized.
 
     Anything using GraphQL we don't model — arguments, aliases, directives,
     fragments — is returned unchanged, so the raw selection still works verbatim.
@@ -947,12 +948,13 @@ def _normalize_fields(fields: str | None) -> str | None:
     if any(ch in fields for ch in "():@") or "..." in fields:
         return fields  # dotted but also advanced GraphQL: don't risk mangling it
 
-    # Tokenize into NAME / DOT / LBRACE / RBRACE (whitespace separates).
+    # Tokenize into NAME / DOT / LBRACE / RBRACE (whitespace and commas separate:
+    # commas are insignificant in GraphQL, so accept "a.b, c.d" as "a.b c.d").
     tokens: list[tuple[str, str]] = []
     i, n = 0, len(fields)
     while i < n:
         ch = fields[i]
-        if ch.isspace():
+        if ch.isspace() or ch == ",":
             i += 1
         elif ch in "{}.":
             tokens.append(({"{": "LBRACE", "}": "RBRACE", ".": "DOT"}[ch], ch))

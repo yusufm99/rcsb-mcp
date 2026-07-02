@@ -318,7 +318,8 @@ Return types and fetching details:
     - Sequence Coordinates: rcsb_describe_seqcoord_object(into=, query=).
   `fields=` accepts EITHER dotted attribute paths
   (e.g. "rcsb_polymer_entity.pdbx_description") OR GraphQL nested-brace syntax
-  (e.g. "rcsb_polymer_entity { pdbx_description }"), and the two may be mixed.
+  (e.g. "rcsb_polymer_entity { pdbx_description }"), the two may be mixed, and multiple
+  paths are separated by spaces or commas.
 - Every search/Data/Sequence-Coordinates tool response includes a link to the interactive
   query editor for that exact request — `query_editor_url` (search) or `graphiql_url`
   (GraphQL). When you show your work, surface that link verbatim; never construct these
@@ -637,6 +638,9 @@ async def _flatten_object_fields(
 # is undefined". This is the choke point that catches a bad `fields=` guess (the schema has no
 # interfaces/unions/args, so an undefined field is always a genuine mistake, never ambiguity).
 _FIELD_UNDEFINED_RE = re.compile(r"Field '([^']+)' in type '([^']+)' is undefined")
+# A malformed `fields=` selection (e.g. paths the normalizer couldn't expand) reaches the parser
+# and comes back as a syntax error; match it so we can explain the accepted format instead.
+_SYNTAX_ERR_RE = re.compile(r"invalid syntax|token recognition|antlr|parse error", re.IGNORECASE)
 # Reverse the DATA_OBJECTS registry so an error carrying a root field can name the object_key to
 # fix it with (currently an identity map, but kept derived so it stays correct if they diverge).
 _ROOT_FIELD_TO_OBJECT_KEY = {spec.root_field: key for key, spec in queries.DATA_OBJECTS.items()}
@@ -647,19 +651,31 @@ async def _enrich_field_errors(msgs: str, root_field: str, url: str) -> str:
 
     For each undefined field named in `msgs`, add (best-effort) where that field actually lives in
     the schema and a close-name suggestion on the offending type, then steer to the field-discovery
-    tool — so a wrong `fields=` guess becomes one guided fix instead of blind retry. Returns the
-    original `msgs` unchanged for non-field errors, or if schema introspection is unavailable.
+    tool — so a wrong `fields=` guess becomes one guided fix instead of blind retry. A malformed
+    selection (syntax error) instead gets the accepted `fields=` format explained. Returns the
+    original `msgs` unchanged for other errors, or if schema introspection is unavailable.
     """
+    is_data = url == DATA_GRAPHQL_URL
+
+    def _discover(example: str) -> str:
+        return (
+            f'rcsb_list_data_fields("{_ROOT_FIELD_TO_OBJECT_KEY.get(root_field, root_field)}", '
+            f'query="{example}")' if is_data
+            else f'rcsb_describe_seqcoord_object("{root_field}", query="{example}")'
+        )
+
     undefined = _FIELD_UNDEFINED_RE.findall(msgs)
     if not undefined:
+        if _SYNTAX_ERR_RE.search(msgs):
+            return (
+                f"{msgs}. The `fields=` value must be a GraphQL selection: dotted paths like "
+                '"struct.title exptl.method" or braces like "struct { title }" (the two may be '
+                "mixed), with multiple paths separated by spaces or commas. Discover valid paths "
+                f"with {_discover('<keyword>')}, and pass verified paths (never guess)."
+            )
         return msgs
-    is_data = url == DATA_GRAPHQL_URL
     example = undefined[0][0]
-    discover = (
-        f'rcsb_list_data_fields("{_ROOT_FIELD_TO_OBJECT_KEY.get(root_field, root_field)}", '
-        f'query="{example}")' if is_data
-        else f'rcsb_describe_seqcoord_object("{root_field}", query="{example}")'
-    )
+    discover = _discover(example)
     try:
         root_type = (await _root_field_types(url)).get(root_field)
     except Exception:
