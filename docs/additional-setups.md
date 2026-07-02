@@ -7,6 +7,31 @@ repository checkout.
 For the primary Claude Desktop setup, see the project
 [README](../README.md#connect-to-claude-desktop).
 
+## Table of contents
+
+* [Connect to Codex Desktop on Windows](#connect-to-codex-desktop-on-windows)
+
+  * [1. Find `uv.exe`](#1-find-uvexe)
+  * [2. Open the Codex configuration](#2-open-the-codex-configuration)
+  * [3. Test the connection](#3-test-the-connection)
+* [Connect to LM Studio on Windows](#connect-to-lm-studio-on-windows)
+
+  * [1. Download a tool-capable model](#1-download-a-tool-capable-model)
+  * [2. Configure the MCP server](#2-configure-the-mcp-server)
+  * [3. Limit the enabled tools for small models](#3-limit-the-enabled-tools-for-small-models)
+  * [4. Test an IHM search](#4-test-an-ihm-search)
+  * [Troubleshooting](#troubleshooting)
+
+    * [The model returns no content](#the-model-returns-no-content)
+    * [The model fails to generate a tool call](#the-model-fails-to-generate-a-tool-call)
+    * [The model fails to load](#the-model-fails-to-load)
+    * [Context usage exceeds 100%](#context-usage-exceeds-100)
+* [Other model options](#other-model-options)
+
+  * [Gemini](#gemini)
+  * [Qwen](#qwen)
+  * [DeepSeek](#deepseek)
+
 ## Connect to Codex Desktop on Windows
 
 The Codex desktop app can use local MCP servers through:

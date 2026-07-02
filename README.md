@@ -133,6 +133,13 @@ pip install -e .
 uv pip install -e .
 ```
 
+## Installing uv
+
+`uvx` ships with [uv](https://docs.astral.sh/uv/). If you don't have it yet, refer to the
+[official uv installation docs](https://docs.astral.sh/uv/getting-started/installation/) for
+up-to-date instructions across all platforms.
+
+
 ## Run / test
 
 ```bash
@@ -154,171 +161,16 @@ answer real PDB questions. See [`evals/README.md`](evals/README.md) to run it.
 
 ## Connect to Claude Desktop
 
-### Windows — plain `uv` setup
+Open the Claude Desktop configuration file:
 
-This method uses the full path to `uv.exe`, which avoids Windows PATH issues in
-Claude Desktop.
+* **macOS:** Claude menu → **Settings** → **Developer** → **Edit Config**
+* **Windows:** Hamburger menu → **File** → **Settings** → **Developer** → **Edit Config**
 
-#### 1. Install `uv`
-
-Open PowerShell:
-
-```powershell
-winget install --id astral-sh.uv -e --accept-package-agreements --accept-source-agreements
-```
-
-Close and reopen PowerShell, then verify:
-
-```powershell
-uv --version
-```
-
-#### 2. Install Python
-
-```powershell
-uv python install 3.12
-```
-
-#### 3. Find the full path to `uv.exe`
-
-```powershell
-$UV = (Get-Command uv -ErrorAction Stop).Source
-$UV
-```
-
-Copy the path that is printed. It will look similar to:
-
-```text
-C:\Users\<USERNAME>\AppData\Local\Microsoft\WinGet\Packages\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\uv.exe
-```
-
-#### 4. Verify that `rcsb-mcp` can load
-
-```powershell
-uv tool run --python 3.12 --from "rcsb-mcp==0.3.0" python -c "import rcsb_mcp.server; print('RCSB MCP import OK')"
-```
-
-Expected output:
-
-```text
-RCSB MCP import OK
-```
-
-#### 5. Configure Claude Desktop
-
-In Claude Desktop, open:
-
-```text
-Settings → Developer → Edit Config
-```
-
-Edit `claude_desktop_config.json` and add:
-
-```json
-{
-  "mcpServers": {
-    "rcsb-mcp": {
-      "command": "C:\\FULL\\PATH\\TO\\uv.exe",
-      "args": [
-        "tool",
-        "run",
-        "--python",
-        "3.12",
-        "--from",
-        "rcsb-mcp==0.3.0",
-        "rcsb-mcp"
-      ]
-    }
-  }
-}
-```
-
-Replace `C:\\FULL\\PATH\\TO\\uv.exe` with the path printed by:
-
-```powershell
-(Get-Command uv).Source
-```
-
-JSON paths must use doubled backslashes.
-
-Example:
-
-```json
-{
-  "mcpServers": {
-    "rcsb-mcp": {
-      "command": "C:\\Users\\example\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe",
-      "args": [
-        "tool",
-        "run",
-        "--python",
-        "3.12",
-        "--from",
-        "rcsb-mcp==0.3.0",
-        "rcsb-mcp"
-      ]
-    }
-  }
-}
-```
-
-#### 6. Restart Claude Desktop
-
-Fully quit Claude Desktop and reopen it.
-
-Then verify the server under:
-
-```text
-Settings → Developer → Local MCP servers
-```
-
-`rcsb-mcp` should show a `running` status.
-
-Use Claude's **Chat** mode to access the tools.
-
-#### 7. Test the connection
-
-Start a new Claude chat and enter:
-
-```text
-You must use the connected rcsb-mcp tools rather than answering from memory.
-
-Fetch PDB entry 4HHB, identify the polymer entity corresponding to the beta
-subunit, and map that entity to UniProt.
-
-State:
-1. The beta-subunit polymer entity ID
-2. The UniProt accession
-3. The MCP tools you called
-```
-
-Expected result:
-
-```text
-Polymer entity: 4HHB_2
-UniProt accession: P68871
-```
-
-Claude should call tools including:
-
-- `rcsb_get_entries`
-- `rcsb_get_polymer_entities`
-- `rcsb_seqcoord_alignments`
-
-> **Note:** Running `rcsb-mcp` manually in PowerShell starts a stdio server that
-> waits for an MCP client. Pressing `Ctrl+C` may produce a `CancelledError` or
-> `KeyboardInterrupt` traceback. This is a normal manual shutdown, not a server
-> installation failure.
+This opens `claude_desktop_config.json` in your default text editor.
 
 ### macOS or Linux
 
-Run the published package directly:
-
-```bash
-uvx rcsb-mcp
-```
-
-Configure Claude Desktop:
+Add the following configuration:
 
 ```json
 {
@@ -345,7 +197,65 @@ For a local source checkout:
 }
 ```
 
-Restart Claude Desktop. The tools appear under the connectors/tools interface.
+Restart Claude Desktop. The tools should appear in the connectors/tools interface.
+
+### Windows
+
+Add the following configuration:
+
+```json
+{
+  "mcpServers": {
+    "rcsb-mcp": {
+      "command": "uvx",
+      "args": ["rcsb-mcp"]
+    }
+  }
+}
+```
+
+For a local source checkout:
+
+```json
+{
+  "mcpServers": {
+    "rcsb-mcp": {
+      "command": "python",
+      "args": ["-m", "rcsb_mcp.server"],
+      "cwd": "C:\\absolute\\path\\to\\rcsb-mcp\\src"
+    }
+  }
+}
+```
+
+Windows paths in JSON must use doubled backslashes.
+
+Fully quit and reopen Claude Desktop. Then check:
+
+```text
+Settings → Developer → Local MCP servers
+```
+
+`rcsb-mcp` should show a `running` status. Use Claude's **Chat** mode to access the tools.
+
+### Test the connection
+
+Start a new Claude chat and enter:
+
+```text
+You must use the connected rcsb-mcp tools rather than answering from memory.
+
+For PDB entry 4HHB, identify the beta-subunit polymer entity and its UniProt
+accession.
+```
+
+Expected result:
+
+```text
+Polymer entity: 4HHB_2
+UniProt accession: P68871
+```
+
 
 ## Additional setups
 
