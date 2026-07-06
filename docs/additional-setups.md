@@ -11,9 +11,8 @@ For the primary Claude Desktop setup, see the project
 
 * [Connect to Codex Desktop on Windows](#connect-to-codex-desktop-on-windows)
 
-  * [1. Find `uv.exe`](#1-find-uvexe)
-  * [2. Open the Codex configuration](#2-open-the-codex-configuration)
-  * [3. Test the connection](#3-test-the-connection)
+  * [1. Open the Codex configuration](#1-open-the-codex-configuration)
+  * [2. Test the connection](#2-test-the-connection)
 * [Connect to LM Studio on Windows](#connect-to-lm-studio-on-windows)
 
   * [1. Download a tool-capable model](#1-download-a-tool-capable-model)
@@ -42,17 +41,7 @@ The Codex desktop app can use local MCP servers through:
 
 The Codex CLI is not required for this setup.
 
-### 1. Find `uv.exe`
-
-In PowerShell:
-
-```powershell
-(Get-Command uv -ErrorAction Stop).Source
-```
-
-Copy the complete path that is printed.
-
-### 2. Open the Codex configuration
+### 1. Open the Codex configuration
 
 Fully close Codex Desktop, then run:
 
@@ -66,40 +55,8 @@ the bottom:
 
 ```toml
 [mcp_servers.rcsb-mcp]
-command = 'C:\FULL\PATH\TO\uv.exe'
-args = [
-    "tool",
-    "run",
-    "--python",
-    "3.12",
-    "--from",
-    "rcsb-mcp==0.3.0",
-    "rcsb-mcp"
-]
-startup_timeout_sec = 60
-tool_timeout_sec = 120
-enabled = true
-```
-
-Replace `C:\FULL\PATH\TO\uv.exe` with the path returned by PowerShell.
-
-The path is enclosed in single quotes so Windows backslashes do not need to be
-escaped.
-
-Example:
-
-```toml
-[mcp_servers.rcsb-mcp]
-command = 'C:\Users\example\AppData\Local\Microsoft\WinGet\Packages\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\uv.exe'
-args = [
-    "tool",
-    "run",
-    "--python",
-    "3.12",
-    "--from",
-    "rcsb-mcp==0.3.0",
-    "rcsb-mcp"
-]
+command = "uvx"
+args = ["rcsb-mcp"]
 startup_timeout_sec = 60
 tool_timeout_sec = 120
 enabled = true
@@ -107,7 +64,7 @@ enabled = true
 
 Save the file and reopen Codex Desktop.
 
-### 3. Test the connection
+### 2. Test the connection
 
 Start a new Codex chat and enter:
 
@@ -132,9 +89,9 @@ UniProt accession: P68871
 
 Codex should call:
 
-- `rcsb_get_entries`
-- `rcsb_get_polymer_entities`
-- `rcsb_seqcoord_alignments`
+* `rcsb_get_entries`
+* `rcsb_get_polymer_entities`
+* `rcsb_seqcoord_alignments`
 
 A successful second test is:
 
@@ -187,46 +144,8 @@ If `mcp.json` is empty, add:
 {
   "mcpServers": {
     "rcsb-mcp": {
-      "command": "C:\\FULL\\PATH\\TO\\uv.exe",
-      "args": [
-        "tool",
-        "run",
-        "--python",
-        "3.12",
-        "--from",
-        "rcsb-mcp==0.3.0",
-        "rcsb-mcp"
-      ]
-    }
-  }
-}
-```
-
-Find the complete `uv.exe` path in PowerShell:
-
-```powershell
-(Get-Command uv -ErrorAction Stop).Source
-```
-
-Replace `C:\\FULL\\PATH\\TO\\uv.exe` with that path. JSON paths require doubled
-backslashes.
-
-Example:
-
-```json
-{
-  "mcpServers": {
-    "rcsb-mcp": {
-      "command": "C:\\Users\\example\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe",
-      "args": [
-        "tool",
-        "run",
-        "--python",
-        "3.12",
-        "--from",
-        "rcsb-mcp==0.3.0",
-        "rcsb-mcp"
-      ]
+      "command": "uvx",
+      "args": ["rcsb-mcp"]
     }
   }
 }
@@ -234,9 +153,9 @@ Example:
 
 Save `mcp.json`. In the **Program** panel, confirm that:
 
-- `mcp/rcsb-mcp` is enabled;
-- the `rcsb_*` tools are visible;
-- the `rcsb-mcp` integration is attached to the chat.
+* `mcp/rcsb-mcp` is enabled;
+* the `rcsb_*` tools are visible;
+* the `rcsb-mcp` integration is attached to the chat.
 
 No local repository folder needs to be opened when using the published package.
 
@@ -248,10 +167,10 @@ is enabled at once.
 
 For best results with Qwen3 4B:
 
-- start a new chat for each task;
-- enable only the tools needed for that task;
-- state the tool names and steps explicitly;
-- avoid requesting very large result sets unless necessary.
+* start a new chat for each task;
+* enable only the tools needed for that task;
+* state the tool names and steps explicitly;
+* avoid requesting very large result sets unless necessary.
 
 For the 4HHB test, enable only:
 
