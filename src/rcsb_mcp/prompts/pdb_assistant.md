@@ -43,6 +43,8 @@ For a structure-search query, present the results as a table inside a fully rend
   * **Experimental Method**
   * **Resolution (Å)** (display "NA" if unavailable)
   * **Additional Information** (query-specific details)
+* The page should include a **Data usage summary** section explaining how the information returned by each API call was used to choose, rank, filter, and enrich the final collection of structures (see **Data Usage Summary** below).
+* As the **last element** of the page, include a link to the RCSB.org Advanced Search that opens the final collection of structures (see **Explore the Final Collection in RCSB.org** below).
 
 For the PDB ID column, use links of the form:
 
@@ -83,6 +85,36 @@ with a short label and its editor link, e.g.:
 
 This satisfies the "indicate all the RCSB PDB APIs used" and "all the search attributes
 and conditions used" requirements above, and makes the agent's workflow auditable.
+
+## Data Usage Summary (how API data drove the final selection)
+
+Add a **"Data usage summary"** section that makes the agent's decision process
+explicit: for each API call — or logical group of calls — explain what
+information it returned and how that information was used to choose, rank,
+filter, or enrich the final collection of structures. Where the "API requests"
+section above lists *which* calls were made, this section explains *why* each
+structure ended up in (or was excluded from) the final set, so the reader can
+follow the reasoning from raw API output to the delivered results.
+
+Cover, where applicable:
+
+* **Discovery** — which search tool produced the initial candidate set, on what
+  attribute / keyword / sequence / chemistry, and how many candidates it matched
+  (`total_count`).
+* **Filtering & disambiguation** — how retrieved metadata (titles, PubMed
+  abstracts, organism, method, resolution, annotations) was used to confirm
+  genuine matches, drop likely false positives, or narrow the candidates.
+* **Ranking** — what criteria ordered the final results (relevance score,
+  resolution, release date, closeness to the user's request).
+* **Enrichment** — which follow-up `rcsb_get_*` / `rcsb_seqcoord_*` /
+  `rcsb_find_*` calls supplied the values shown in the table and the *Additional
+  Information* column.
+
+Keep it concise — a short ordered list, or a sentence or two per call, is
+enough. This section is largely the agent's own narrative of its reasoning, so
+wrap the interpretive parts per **Source Provenance** below, while keeping
+concrete tool-returned values (counts, identifiers, attribute names) in the
+default text color.
 
 ## Source Provenance (highlight information not from the MCP tools)
 
@@ -143,3 +175,68 @@ Adapt the content of the **Additional Information** column to the user's questio
 * Favor completeness and usefulness over strict adherence to a fixed schema.
 * Add, remove, or reorder columns when doing so improves the clarity of the response for the specific query.
 * Escape any tool-returned text (titles, organism names, descriptions) before inserting it into the HTML page.
+
+## Explore the Final Collection in RCSB.org (last element of the report)
+
+As the **very last element** of the report, add a link that opens the complete
+final collection of structures in the RCSB.org Advanced Search results page, so
+the user can view, sort, refine, and download the whole set in the RCSB.org UI.
+
+Build the link from the exact list of PDB IDs in the final results table:
+substitute those IDs into the `value` array of the JSON below (keep everything
+else verbatim), percent-encode the whole JSON, and prepend
+`https://www.rcsb.org/search?request=`.
+
+```json
+{
+  "query": {
+    "type": "group",
+    "logical_operator": "and",
+    "nodes": [
+      {
+        "type": "group",
+        "logical_operator": "and",
+        "label": "text",
+        "nodes": [
+          {
+            "type": "group",
+            "logical_operator": "and",
+            "nodes": [
+              {
+                "type": "terminal",
+                "service": "text",
+                "parameters": {
+                  "attribute": "rcsb_entry_container_identifiers.entry_id",
+                  "operator": "in",
+                  "negation": false,
+                  "value": ["101M", "1ASH", "4HHB"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "return_type": "entry",
+  "request_options": {
+    "paginate": {"start": 0, "rows": 25},
+    "results_content_type": ["experimental"],
+    "sort": [{"sort_by": "score", "direction": "desc"}],
+    "scoring_strategy": "combined"
+  }
+}
+```
+
+* Set `paginate.rows` to at least the number of PDB IDs in the collection so the
+  whole set shows on the first results page.
+* This link targets entry (structure) collections (`return_type: "entry"`). For
+  non-entry results — e.g. chemical components (`return_type: "mol_definition"`)
+  — adapt the `return_type` and `attribute`, or omit the link if it does not
+  apply.
+
+Example — for PDB IDs 101M, 1ASH, 4HHB the resulting link is:
+
+```
+https://www.rcsb.org/search?request=%7B%22query%22%3A%7B%22type%22%3A%22group%22%2C%22logical_operator%22%3A%22and%22%2C%22nodes%22%3A%5B%7B%22type%22%3A%22group%22%2C%22logical_operator%22%3A%22and%22%2C%22nodes%22%3A%5B%7B%22type%22%3A%22group%22%2C%22nodes%22%3A%5B%7B%22type%22%3A%22terminal%22%2C%22service%22%3A%22text%22%2C%22parameters%22%3A%7B%22attribute%22%3A%22rcsb_entry_container_identifiers.entry_id%22%2C%22operator%22%3A%22in%22%2C%22negation%22%3Afalse%2C%22value%22%3A%5B%22101M%22%2C%221ASH%22%2C%224HHB%22%5D%7D%7D%5D%2C%22logical_operator%22%3A%22and%22%7D%5D%2C%22label%22%3A%22text%22%7D%5D%7D%2C%22return_type%22%3A%22entry%22%2C%22request_options%22%3A%7B%22paginate%22%3A%7B%22start%22%3A0%2C%22rows%22%3A25%7D%2C%22results_content_type%22%3A%5B%22experimental%22%5D%2C%22sort%22%3A%5B%7B%22sort_by%22%3A%22score%22%2C%22direction%22%3A%22desc%22%7D%5D%2C%22scoring_strategy%22%3A%22combined%22%7D%7D
+```
