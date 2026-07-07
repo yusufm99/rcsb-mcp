@@ -62,6 +62,16 @@ def test_sequence():
     assert p["value"] == "MTEYKLV"  # uppercased + stripped
     assert p["identity_cutoff"] == 0.9
     assert q["return_type"] == "polymer_entity"
+    # sequence search projects onto any return_type (no polymer_entity-only limit)
+    e = queries.build_sequence_query("mteyklv", return_type="entry")
+    assert e["return_type"] == "entry"
+    assert e["request_options"]["scoring_strategy"] == "sequence"
+    try:
+        queries.build_sequence_query("mteyklv", return_type="bogus")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for bad return_type")
     print("ok: sequence")
 
 
@@ -323,8 +333,15 @@ def test_strucmotif():
     assert p["value"]["residue_ids"][2]["struct_oper_id"] == "1"
     assert p["rmsd_cutoff"] == 1.5
     assert p["atom_pairing_scheme"] == "SIDE_CHAIN" and p["motif_pruning_strategy"] == "KRUSKAL"
-    assert q["return_type"] == "polymer_entity"
+    # default is "assembly" (most general unit for a 3D motif; matches RCSB.org advanced search)
+    assert q["return_type"] == "assembly"
     assert q["request_options"]["scoring_strategy"] == "strucmotif"
+    # any other return_type may still be requested explicitly
+    pe = queries.build_strucmotif_query(
+        "2mnr", residue_ids=[{"label_asym_id": "A", "label_seq_id": i} for i in (1, 2)],
+        return_type="polymer_entity",
+    )
+    assert pe["return_type"] == "polymer_entity"
     print("ok: strucmotif")
 
 

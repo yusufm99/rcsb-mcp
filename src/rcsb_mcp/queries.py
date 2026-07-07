@@ -707,7 +707,7 @@ def build_strucmotif_query(
     motif_pruning_strategy: str = "KRUSKAL",
     exchanges: list[dict[str, Any]] | None = None,
     limit: int | None = None,
-    return_type: str = "polymer_entity",
+    return_type: str = "assembly",
     rows: int = 10,
     start: int = 0,
     all_hits: bool = False,

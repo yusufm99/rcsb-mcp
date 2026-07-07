@@ -1458,6 +1458,7 @@ async def rcsb_search_by_sequence(
     sequence_type: SequenceType = "protein",
     identity_cutoff: Annotated[float, Field(ge=0.0, le=1.0)] = 0.3,
     evalue_cutoff: Annotated[float, Field(ge=0.0)] = 1.0,
+    return_type: ReturnType = "polymer_entity",
     limit: Limit = 10,
     offset: Offset = 0,
     all_hits: bool = False,
@@ -1474,6 +1475,9 @@ async def rcsb_search_by_sequence(
         sequence_type: "protein", "dna", or "rna".
         identity_cutoff: Minimum sequence identity as a fraction 0-1 (e.g. 0.3 = 30%).
         evalue_cutoff: Maximum E-value to report.
+        return_type: What to return (default "polymer_entity"); one of entry, polymer_entity,
+            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
+            "Return types and fetching details" note in the server instructions).
         limit: Max hits (1-100). Returns polymer_entity IDs like "4HHB_1" — fetch their
             details with rcsb_get_polymer_entities.
         offset: Number of hits to skip, for paging (default 0); pass the response's
@@ -1509,6 +1513,7 @@ async def rcsb_search_by_sequence(
         sequence_type=sequence_type,
         identity_cutoff=identity_cutoff,
         evalue_cutoff=evalue_cutoff,
+        return_type=return_type,
         rows=limit,
         start=offset,
         all_hits=all_hits,
@@ -1557,9 +1562,9 @@ async def rcsb_search_by_chemical(
             fingerprint-similarity (similar molecules).
         match_subset: Formula queries only — match formulas that merely contain the
             requested atoms.
-        return_type: What to return (default "mol_definition" = the chemical component).
-            Use return_type="entry" to instead get the PDB structures that contain a
-            matching component. Other types from the server instructions also apply.
+        return_type: What to return (default "mol_definition" = the chemical component); one of entry,
+            polymer_entity, non_polymer_entity, polymer_instance, assembly, mol_definition (see the
+            "Return types and fetching details" note in the server instructions).
         limit: Max hits (1-100).
         offset: Number of hits to skip, for paging (default 0); pass the response's
             next_offset back with the same query to fetch the next page.
@@ -1636,9 +1641,10 @@ async def rcsb_search_by_structure(
             Defaults to assembly "1" when neither assembly_id nor asym_id is given.
         asym_id: Use this single chain as the reference instead (mutually exclusive
             with assembly_id).
-        return_type: What to return; defaults to "assembly" for an assembly reference or
-            "polymer_instance" for a chain reference. May be overridden with any of the
-            six types (see server instructions).
+        return_type: What to return (defaults to "assembly" for an assembly reference or
+            "polymer_instance" for a chain reference); one of entry, polymer_entity,
+            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
+            "Return types and fetching details" note in the server instructions).
         limit: Max hits (1-100).
         offset: Number of hits to skip, for paging (default 0); pass the response's
             next_offset back with the same query to fetch the next page.
@@ -1712,8 +1718,9 @@ async def rcsb_search_by_seqmotif(
             (prosite), "C..H[LIVF]" (regex), or "NXS" (simple wildcards).
         pattern_type: "prosite" (default), "regex", or "simple".
         sequence_type: "protein" (default), "dna", or "rna".
-        return_type: What to return (default "polymer_entity"); one of the six types
-            (see server instructions). Default hits feed rcsb_get_polymer_entities.
+        return_type: What to return (default "polymer_entity"); one of entry, polymer_entity,
+            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
+            "Return types and fetching details" note in the server instructions).
         limit: Max hits (1-100).
         offset: Number of hits to skip, for paging (default 0); pass the response's
             next_offset back with the same query to fetch the next page.
@@ -1814,7 +1821,7 @@ async def rcsb_search_strucmotif(
     rmsd_cutoff: Annotated[float, Field(ge=0.0)] = 2.0,
     atom_pairing_scheme: AtomPairingScheme = "SIDE_CHAIN",
     motif_pruning_strategy: MotifPruningStrategy = "KRUSKAL",
-    return_type: ReturnType = "polymer_entity",
+    return_type: ReturnType = "assembly",
     limit: Limit = 10,
     offset: Offset = 0,
     all_hits: bool = False,
@@ -1849,8 +1856,9 @@ async def rcsb_search_strucmotif(
         rmsd_cutoff: Maximum RMSD of accepted hits (default 2.0).
         atom_pairing_scheme: ALL, BACKBONE, SIDE_CHAIN (default), or PSEUDO_ATOMS.
         motif_pruning_strategy: NONE or KRUSKAL (default).
-        return_type: What to return (default "polymer_entity"); one of the six types
-            (see server instructions).
+        return_type: What to return (default "assembly"); one of entry, polymer_entity,
+            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
+            "Return types and fetching details" note in the server instructions).
         limit: Max hits (1-100).
         offset: Number of hits to skip, for paging (default 0); pass the response's
             next_offset back with the same query to fetch the next page.

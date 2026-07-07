@@ -6,6 +6,7 @@ of the live introspection calls — so depth-capping, cycle-guarding, keyword fi
 and the result cap are all exercised without touching the network.
 """
 import asyncio
+import inspect
 import sys
 import pathlib
 
@@ -202,6 +203,22 @@ def test_enrich_syntax_error():
     print("ok: enrich syntax error")
 
 
+def test_search_return_type_defaults():
+    # Per-tool return_type defaults are deliberate; pin them so they aren't swapped by accident.
+    def _default(tool):
+        return inspect.signature(tool).parameters["return_type"].default
+
+    # strucmotif defaults to "assembly" — the most general unit for a 3D motif and the
+    # default of RCSB.org advanced search (symmetry mates only exist at assembly level).
+    assert _default(server.rcsb_search_strucmotif) == "assembly"
+    # the other polymer-oriented services default to "polymer_entity"
+    assert _default(server.rcsb_search_by_sequence) == "polymer_entity"
+    assert _default(server.rcsb_search_by_seqmotif) == "polymer_entity"
+    # chemical defaults to the chemical component itself
+    assert _default(server.rcsb_search_by_chemical) == "mol_definition"
+    print("ok: search return_type defaults")
+
+
 if __name__ == "__main__":
     test_flatten_depth_and_traversal()
     test_flatten_cycle_guard()
@@ -215,4 +232,5 @@ if __name__ == "__main__":
     test_enrich_unknown_field()
     test_enrich_seqcoord_steer()
     test_enrich_syntax_error()
+    test_search_return_type_defaults()
     print("\nAll server tests passed.")
