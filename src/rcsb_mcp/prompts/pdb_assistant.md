@@ -104,8 +104,10 @@ Cover, where applicable:
 * **Filtering & disambiguation** — how retrieved metadata (titles, PubMed
   abstracts, organism, method, resolution, annotations) was used to confirm
   genuine matches, drop likely false positives, or narrow the candidates.
-* **Ranking** — what criteria ordered the final results (relevance score,
-  resolution, release date, closeness to the user's request).
+* **Ranking** — what criteria ordered the final results (resolution, release
+  date, closeness to the user's request). The `score` from rcsb_search_fulltext /
+  rcsb_search_by_attribute is only an ElasticSearch text-match signal, not a
+  measure of biological importance — don't rank structures by it.
 * **Enrichment** — which follow-up `rcsb_get_*` / `rcsb_seqcoord_*` /
   `rcsb_find_*` calls supplied the values shown in the table and the *Additional
   Information* column.

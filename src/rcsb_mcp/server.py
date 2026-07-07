@@ -897,7 +897,10 @@ async def rcsb_search_fulltext(
     real answer. The response carries identifiers + scores only, so after searching, JUDGE each
     hit's relevance yourself: fetch its title (and, for borderline cases, its PubMed abstract)
     with rcsb_get_entries (-> struct.title / pubmed.rcsb_pubmed_abstract_text); decide whether
-    that text actually supports the user's question, and treat a low `score` as only a weak hint.
+    that text actually supports the user's question, and treat `score` as only a weak hint.
+    `score` is an ElasticSearch text-relevance score (how well a hit's text matched the query),
+    NOT a measure of biological importance, structural quality, or significance — never tell the
+    user one hit is more important/better than another because its score is higher.
 
     Args:
         query: Free-text terms matched (case-insensitively) against all text annotations.
@@ -1428,6 +1431,9 @@ async def rcsb_search_by_attribute(
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
         query_editor_url}. Hits are identifiers only — batch them into rcsb_get_entries
         (or the rcsb_get_* tool matching return_type) for titles and other metadata.
+        The per-hit `score` is an ElasticSearch score (near-uniform for a pure attribute
+        filter, which is a boolean match) and carries NO biological meaning — don't use it
+        to rank hits by importance or quality.
         With all_hits, the offset/has_more/next_offset paging fields are omitted. With `facets`,
         instead returns {total_count, facets, query_editor_url}.
     """
