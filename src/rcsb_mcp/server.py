@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -28,8 +29,10 @@ from urllib.parse import quote
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import PlainTextResponse
 
 from rcsb_mcp.search_attributes import SEARCH_ATTRIBUTES
@@ -165,6 +168,37 @@ OLS_SEARCH_URL = "https://www.ebi.ac.uk/ols4/api/search"
 # Organism / taxon resolver — UniProt taxonomy REST (text -> NCBI Taxonomy id). UniProt's
 # taxonId IS the NCBI Taxonomy id, which feeds rcsb_entity_source_organism.taxonomy_lineage.id.
 UNIPROT_TAXONOMY_SEARCH_URL = "https://rest.uniprot.org/taxonomy/search"
+
+
+# --------------------------------------------------------------------------- #
+# HTTP transport security (DNS-rebinding Host/Origin validation)
+# --------------------------------------------------------------------------- #
+def _transport_security() -> TransportSecuritySettings:
+    """Host/Origin validation policy for the streamable-HTTP deployment.
+
+    FastMCP auto-enables DNS-rebinding protection when `host` is a loopback address
+    (its default) and no explicit policy is given, allow-listing only
+    127.0.0.1/localhost. Behind an ingress that forwards the real Host header
+    (e.g. rcsb-mcp.k8s.rcsb.org), that host then fails validation and every
+    POST /mcp is rejected with 421 "Invalid Host header" — so no client can connect.
+
+    This server is a public, TLS-terminated, read-only proxy meant to be added to
+    arbitrary MCP clients (including browser-hosted agents whose Origin can't be
+    enumerated), so validation is DISABLED by default. Set RCSB_MCP_ALLOWED_HOSTS
+    (comma-separated) to lock it down to known hosts instead — note that enabling it
+    also turns on Origin validation, which rejects browser clients unless their
+    origins are listed in RCSB_MCP_ALLOWED_ORIGINS.
+    """
+    hosts = [h.strip() for h in os.getenv("RCSB_MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+    if not hosts:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    origins = [o.strip() for o in os.getenv("RCSB_MCP_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=origins,
+    )
+
 
 mcp = FastMCP(
     name="rcsb_mcp",
@@ -323,7 +357,15 @@ Return types and fetching details:
 - Every search/Data/Sequence-Coordinates tool response includes a link to the interactive
   query editor for that exact request — `query_editor_url` (search) or `graphiql_url`
   (GraphQL). When you show your work, surface that link verbatim; never construct these
-  URLs yourself."""
+  URLs yourself.""",
+    # HTTP deployment runs 2-6 load-balanced replicas with no session affinity, so
+    # run stateless (any pod can serve any request — no per-session state to lose)
+    # and answer with plain JSON instead of long-lived SSE streams. Both flags are
+    # ignored by the stdio transport (local/console use).
+    stateless_http=True,
+    json_response=True,
+    # Accept the real Host header seen behind the ingress (see _transport_security).
+    transport_security=_transport_security(),
 )
 
 
@@ -2603,7 +2645,21 @@ def create_app():
     stdio use (main() / the `rcsb-mcp` console script) constructs nothing.
     Run with: uvicorn rcsb_mcp.server:create_app --factory
     """
-    return mcp.streamable_http_app()
+    app = mcp.streamable_http_app()
+    # Browser-based ("web") agents call POST /mcp with fetch(), which triggers a CORS
+    # preflight and requires CORS response headers; FastMCP's app adds none for /mcp,
+    # so without this a browser blocks the request before it is ever sent. This is a
+    # public, unauthenticated, read-only server, so any origin is allowed. Expose
+    # Mcp-Session-Id so a browser client can read the session header when present.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
+        allow_headers=["*"],
+        expose_headers=["Mcp-Session-Id"],
+        max_age=86400,
+    )
+    return app
 
 
 def main() -> None:
