@@ -219,6 +219,76 @@ def test_search_return_type_defaults():
     print("ok: search return_type defaults")
 
 
+# --- _get_json: a 204 / empty body must not crash the rcsb_find_* resolvers ---------------- #
+class _FakeResp:
+    def __init__(self, status_code, content=b""):
+        self.status_code = status_code
+        self.content = content
+
+    @property
+    def is_success(self):
+        return 200 <= self.status_code < 300
+
+    @property
+    def text(self):
+        return self.content.decode() if isinstance(self.content, bytes) else str(self.content)
+
+    def json(self):
+        import json as _json
+        return _json.loads(self.content)  # raises on empty body — the bug, if 204 isn't handled
+
+
+class _FakeClient:
+    def __init__(self, resp):
+        self._resp = resp
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def get(self, url, params=None):
+        return self._resp
+
+
+def _get_json_with(resp):
+    orig = server.httpx.AsyncClient
+    server.httpx.AsyncClient = lambda *a, **k: _FakeClient(resp)
+    try:
+        return asyncio.run(server._get_json("http://x", {}, "Test"))
+    finally:
+        server.httpx.AsyncClient = orig
+
+
+def test_get_json_204_empty():
+    # 204 No Content (what EBI InterPro returns for a no-match query) -> {}, not a JSONDecodeError.
+    assert _get_json_with(_FakeResp(204, b"")) == {}
+    # a 200 with an empty body is treated the same way.
+    assert _get_json_with(_FakeResp(200, b"")) == {}
+    # a normal 200 JSON body still decodes.
+    assert _get_json_with(_FakeResp(200, b'{"results": [1, 2]}')) == {"results": [1, 2]}
+    print("ok: _get_json 204/empty")
+
+
+def test_interpro_no_match_graceful():
+    # with no matches (empty payload) the resolver returns count 0 + a fall-back-to-keyword note,
+    # instead of propagating the JSONDecodeError that this input used to trigger.
+    async def fake_get_json(url, params, service):
+        return {}
+
+    orig = server._get_json
+    server._get_json = fake_get_json
+    try:
+        r = asyncio.run(server.rcsb_find_interpro_domains(
+            query="acyltransferase domain polyketide synthase", limit=15, with_pdb_counts=False))
+    finally:
+        server._get_json = orig
+    assert r["count"] == 0 and r["entries"] == []
+    assert r.get("note"), "should advise a keyword fallback when nothing matched"
+    print("ok: interpro no-match graceful")
+
+
 if __name__ == "__main__":
     test_flatten_depth_and_traversal()
     test_flatten_cycle_guard()
@@ -233,4 +303,6 @@ if __name__ == "__main__":
     test_enrich_seqcoord_steer()
     test_enrich_syntax_error()
     test_search_return_type_defaults()
+    test_get_json_204_empty()
+    test_interpro_no_match_graceful()
     print("\nAll server tests passed.")

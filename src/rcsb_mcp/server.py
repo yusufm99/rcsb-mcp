@@ -432,6 +432,9 @@ async def _get_json(url: str, params: dict[str, Any], service: str) -> dict[str,
     """GET a JSON resource (shared headers/timeout) with friendly errors.
 
     Used by the ontology resolvers (rcsb_find_* tools) that call EBI and UniProt web services.
+    Some of these (e.g. EBI InterPro) answer a no-match query with 204 No Content / an empty
+    body rather than an empty JSON list; return {} for that so callers see "no results" (and
+    emit their fall-back note) instead of a JSONDecodeError.
     """
     try:
         async with httpx.AsyncClient(
@@ -443,6 +446,8 @@ async def _get_json(url: str, params: dict[str, Any], service: str) -> dict[str,
     except httpx.HTTPError as exc:
         raise RuntimeError(f"{service} connection error ({type(exc).__name__}).") from None
     _check_response(resp, service)
+    if resp.status_code == 204 or not resp.content:
+        return {}
     return resp.json()
 
 
