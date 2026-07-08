@@ -945,7 +945,7 @@ async def rcsb_search_fulltext(
             has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
-            there). Omit for RCSB's default.
+            there).
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
         query_editor_url}. Hits are identifiers only — batch them into rcsb_get_entries
@@ -1425,7 +1425,7 @@ async def rcsb_search_by_attribute(
             has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
-            there). Omit for RCSB's default.
+            there).
         chemical: Set True for chemical-component attributes (paths from
             rcsb_list_pdb_search_attributes(schema="chemical"), e.g. "chem_comp.formula_weight").
             Switches to the text_chem service; usually pair with return_type="mol_definition".
@@ -1513,7 +1513,7 @@ async def rcsb_search_by_sequence(
             has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
-            there). Omit for RCSB's default.
+            there).
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1599,7 +1599,7 @@ async def rcsb_search_by_chemical(
             has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
-            there). Omit for RCSB's default.
+            there).
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1679,7 +1679,7 @@ async def rcsb_search_by_structure(
             has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
-            there). Omit for RCSB's default.
+            there).
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1755,7 +1755,7 @@ async def rcsb_search_by_seqmotif(
             has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
-            there). Omit for RCSB's default.
+            there).
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1893,7 +1893,7 @@ async def rcsb_search_strucmotif(
             has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
-            there). Omit for RCSB's default.
+            there).
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
