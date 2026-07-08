@@ -23,13 +23,13 @@ import difflib
 import json
 import re
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Union
 from urllib.parse import quote
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import PlainTextResponse
 
 from rcsb_mcp.search_attributes import SEARCH_ATTRIBUTES
@@ -131,6 +131,125 @@ def _filter_dicts(attributes: list[AttributeFilter] | None) -> list[dict[str, An
     """Convert typed AttributeFilter inputs into the plain dicts the builders expect."""
     return [f.model_dump() for f in attributes] if attributes else None
 
+
+# --------------------------------------------------------------------------- #
+# Composable search services — one model per service type, combined into a
+# discriminated union so rcsb_search_group can accept ANY mix of them and build
+# a single boolean group. Each model mirrors the matching rcsb_search_by_* tool's
+# inputs; the `type` field is the discriminator (see queries._service_node).
+# --------------------------------------------------------------------------- #
+class _ServiceSpec(BaseModel):
+    """Base for every service spec: reject unknown keys so a mistyped or unsupported
+    field is a clear validation error instead of being silently dropped from the query."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FullTextService(_ServiceSpec):
+    """A free-text keyword condition (the 'full_text' service)."""
+
+    type: Literal["fulltext"]
+    value: str = Field(description="Free-text keywords, e.g. 'CRISPR Cas9'.")
+
+
+class AttributeService(_ServiceSpec):
+    """A single structured attribute condition (the 'text'/'text_chem' service)."""
+
+    type: Literal["attribute"]
+    attribute: str = Field(
+        description="Dotted RCSB attribute path, e.g. 'rcsb_entry_info.resolution_combined'."
+    )
+    operator: TextOperator = Field(description="Type-specific operator (see AttributeFilter).")
+    value: str | int | float | list | dict | None = Field(
+        default=None, description="Comparison value; omit for 'exists'."
+    )
+    negation: bool = Field(default=False, description="Invert the match (NOT).")
+    case_sensitive: bool = Field(default=False, description="Match case-sensitively.")
+    chemical: bool = Field(
+        default=False,
+        description="True for a chemical-component attribute (text_chem service).",
+    )
+
+
+class SequenceService(_ServiceSpec):
+    """A sequence-similarity match (MMseqs2), like rcsb_search_by_sequence."""
+
+    type: Literal["sequence"]
+    sequence: str = Field(description="Query sequence in one-letter code.")
+    sequence_type: SequenceType = "protein"
+    identity_cutoff: Annotated[float, Field(ge=0.0, le=1.0)] = 0.3
+    evalue_cutoff: Annotated[float, Field(ge=0.0)] = 1.0
+
+
+class ChemicalService(_ServiceSpec):
+    """A chemical descriptor/formula match, like rcsb_search_by_chemical."""
+
+    type: Literal["chemical"]
+    value: str = Field(description="A SMILES/InChI string, or a molecular formula.")
+    query_type: ChemQueryType = "descriptor"
+    descriptor_type: DescriptorType = "SMILES"
+    match_type: ChemMatchType = "graph-relaxed"
+    match_subset: bool = False
+
+
+class StructureService(_ServiceSpec):
+    """A 3D shape-similarity match, like rcsb_search_by_structure."""
+
+    type: Literal["structure"]
+    entry_id: str = Field(description="Reference PDB entry, e.g. '4HHB'.")
+    assembly_id: str | None = None
+    asym_id: str | None = None
+    number_of_candidates: Annotated[int, Field(ge=1)] | None = Field(
+        default=None,
+        description="How many pre-filter candidates the shape-match engine considers "
+        "(higher = broader/slower). Omit for the API default.",
+    )
+
+
+class SeqmotifService(_ServiceSpec):
+    """A short sequence-motif match, like rcsb_search_by_seqmotif."""
+
+    type: Literal["seqmotif"]
+    pattern: str = Field(description="Motif pattern (prosite/regex/simple).")
+    pattern_type: SeqmotifPatternType = "prosite"
+    sequence_type: SequenceType = "protein"
+
+
+class StrucmotifService(_ServiceSpec):
+    """A 3D structural-motif (residue-geometry) match, like rcsb_search_strucmotif."""
+
+    type: Literal["strucmotif"]
+    entry_id: str = Field(description="Reference PDB entry defining the motif, e.g. '2MNR'.")
+    residue_ids: list[dict[str, Any]] = Field(
+        description="2-10 residues, each {label_asym_id, label_seq_id, struct_oper_id?}."
+    )
+    backbone_distance_tolerance: Tolerance = 1
+    side_chain_distance_tolerance: Tolerance = 1
+    angle_tolerance: Tolerance = 1
+    rmsd_cutoff: Annotated[float, Field(ge=0.0)] = 2.0
+    atom_pairing_scheme: AtomPairingScheme = "SIDE_CHAIN"
+    motif_pruning_strategy: MotifPruningStrategy = "KRUSKAL"
+    exchanges: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Optional position-specific residue exchanges (allowed substitutions), "
+        "each {residue_id, allowed:[...]}.",
+    )
+    limit: Annotated[int, Field(ge=0)] | None = Field(
+        default=None,
+        description="Optional cap on the number of motif hits the engine returns before "
+        "paging/filtering.",
+    )
+
+
+# Discriminated on `type` so the client schema advertises each service's own fields.
+SearchService = Annotated[
+    Union[
+        FullTextService, AttributeService, SequenceService, ChemicalService,
+        StructureService, SeqmotifService, StrucmotifService,
+    ],
+    Field(discriminator="type"),
+]
+
 # Hard ceiling for all_hits searches: above this many matches the tool refuses and
 # steers to facets/paging, so a broad query can't dump a huge id list into context.
 ALL_HITS_MAX = 10000
@@ -211,8 +330,10 @@ Choosing a search tool:
   rcsb_search_by_chemical (SMILES/InChI/formula), rcsb_search_by_structure (whole 3D shape),
   rcsb_search_by_seqmotif (sequence pattern), rcsb_search_strucmotif (residue geometry). Each also
   accepts optional `attributes` (+ `logical_operator`) to AND/OR structured filters onto the match
-  — e.g. sequence-similar AND from human AND resolution < 2 Å — in one call; reach for
-  rcsb_search_advanced only to combine several of these services or for nested boolean logic.
+  — e.g. sequence-similar AND from human AND resolution < 2 Å — in one call. To combine SEVERAL of
+  these services together (e.g. sequence-similar AND binds a given ligand), use rcsb_search_group:
+  pass a list of typed service specs and they are AND/OR-combined into one group. Reach for
+  rcsb_search_advanced only for arbitrarily NESTED boolean logic (groups within groups).
 - Searches return up to `limit` hits (default 10, max 100) plus pagination fields
   (offset/has_more/next_offset). For more results, re-issue the same query with offset set to
   the response's next_offset — don't just raise limit past 100.
@@ -872,8 +993,9 @@ async def rcsb_search_fulltext(
     a request has NO keyword (only attributes), use rcsb_search_by_attribute; when it resolves
     to a clear attribute and value, prefer structured search — call
     rcsb_list_pdb_search_attributes first to find the exact path and operators (more precise,
-    avoids spurious keyword matches). For NESTED boolean logic or other services
-    (sequence/structure/chemical/motif), use rcsb_search_advanced.
+    avoids spurious keyword matches). To combine this keyword with other services
+    (sequence/structure/chemical/motif) in one query, use rcsb_search_group; for NESTED
+    boolean logic (groups within groups), use rcsb_search_advanced.
 
     BEFORE keyword-searching a biological CONCEPT, try to resolve it to an ontology id first
     and filter on the annotation (far more precise):
@@ -904,7 +1026,8 @@ async def rcsb_search_fulltext(
             Quote a multi-word phrase to require the words adjacent/in order (e.g.
             '"DNA polymerase"'); separate words narrow the results (most must match).
             Trailing '*' is a prefix wildcard. AND/OR/NOT are NOT boolean operators here —
-            for boolean logic across conditions use `attributes` (flat) or rcsb_search_advanced.
+            for boolean logic across conditions use `attributes` (flat), rcsb_search_group
+            (across services), or rcsb_search_advanced (nested).
         attributes: Optional structured conditions combined with the keyword — a list of
             AttributeFilter {attribute, operator, value, negation?, case_sensitive?} (see
             rcsb_search_by_attribute / rcsb_list_pdb_search_attributes for paths and operators).
@@ -1771,11 +1894,12 @@ async def rcsb_search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
 
     Endpoint: https://search.rcsb.org/rcsbsearch/v2/query . The typed rcsb_search_* tools cover
     the common cases (each carries total_count and takes `attributes` + `facets`); use this for
-    anything they don't — return_all_hits, group_by "groups", arbitrarily NESTED and/or
-    boolean groups, and queries that COMBINE several non-text services (sequence, structure,
-    chemical, seqmotif, strucmotif) under one group (e.g. a sequence-similarity match AND a
-    chemical-descriptor match — a single non-text service can already be refined with
-    `attributes` on its rcsb_search_by_* tool). Build the query from "group"
+    anything they don't — return_all_hits, group_by "groups", and arbitrarily NESTED and/or
+    boolean groups (groups within groups). To COMBINE several services (sequence, structure,
+    chemical, seqmotif, strucmotif, text) in a single FLAT AND/OR group — e.g. a
+    sequence-similarity match AND a chemical-descriptor match — prefer rcsb_search_group, which
+    builds that body for you from typed specs; a single non-text service can already be refined
+    with `attributes` on its rcsb_search_by_* tool. Build the query from "group"
     nodes (logical_operator + nodes) and "terminal" nodes (service + parameters); full query
     language: https://search.rcsb.org/ . The body is {"query", "return_type",
     "request_options"} and returns the normalized {total_count, returned, hits} result.
@@ -1802,6 +1926,99 @@ async def rcsb_search_advanced(query_body: dict[str, Any]) -> dict[str, Any]:
     """
     raw = await _post_search(query_body)
     return _format(raw, query_body)
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def rcsb_search_group(
+    services: list[SearchService],
+    logical_operator: LogicalOperator = "and",
+    return_type: ReturnType = "entry",
+    limit: Limit = 10,
+    offset: Offset = 0,
+    all_hits: bool = False,
+    include_computed_models: bool = False,
+    facets: list[dict[str, Any]] | None = None,
+    sort_by: str | None = None,
+    sort_direction: SortDirection = "asc",
+    group_by: GroupBy | None = None,
+    group_by_ranking: GroupByRanking | None = None,
+) -> dict[str, Any]:
+    """Combine ANY mix of search services into ONE boolean (AND/OR) query.
+
+    This is the composable counterpart to the single-service rcsb_search_by_* tools: instead of
+    one primary match refined with text `attributes`, pass a LIST of service specs and they are
+    all combined into a single group node — e.g. "sequence-similar to X AND contains ligand Y
+    AND from human" in one call. Use it whenever a request needs two or more DIFFERENT services
+    together (sequence + chemical, structure + attribute, seqmotif + strucmotif, ...); for a
+    single service, the dedicated rcsb_search_by_* tool is simpler. This builds the query for you
+    from typed specs — reach for rcsb_search_advanced only for arbitrarily NESTED boolean logic
+    (groups within groups) that a single flat AND/OR can't express.
+
+    Each entry in `services` is an object with a `type` field selecting the service and its
+    parameters (fields mirror the matching rcsb_search_by_* tool):
+      - {"type": "fulltext", "value": "..."} — free-text keywords.
+      - {"type": "attribute", "attribute": "...", "operator": "...", "value": ...,
+         "negation"?: bool, "case_sensitive"?: bool, "chemical"?: bool} — one structured
+         condition (set "chemical": true for chem-component attributes).
+      - {"type": "sequence", "sequence": "...", "sequence_type"?, "identity_cutoff"?,
+         "evalue_cutoff"?} — sequence-similarity match.
+      - {"type": "chemical", "value": "...", "query_type"?, "descriptor_type"?, "match_type"?,
+         "match_subset"?} — SMILES/InChI/formula match.
+      - {"type": "structure", "entry_id": "...", "assembly_id"?, "asym_id"?,
+         "number_of_candidates"?} — 3D shape match.
+      - {"type": "seqmotif", "pattern": "...", "pattern_type"?, "sequence_type"?} — sequence motif.
+      - {"type": "strucmotif", "entry_id": "...", "residue_ids": [...], "rmsd_cutoff"?,
+         "exchanges"?, "limit"?, ...} — residue-geometry motif.
+    Add several "attribute" specs to AND/OR multiple structured filters alongside the other
+    services. All specs are combined with a single `logical_operator`. Each service accepts ONLY
+    its documented fields — an unknown or misspelled key is rejected, not silently ignored.
+
+    Args:
+        services: Two or more service specs (a single spec also works but the dedicated
+            rcsb_search_by_* tool is simpler). See the list above for each type's fields.
+        logical_operator: Combine all services with "and" (default) or "or".
+        return_type: What to return (default "entry"); one of the six types (see server
+            instructions). Choose it to match how you'll consume the hits — e.g.
+            "polymer_entity" when grouping or feeding rcsb_get_polymer_entities.
+        limit: Max hits (1-100).
+        offset: Number of hits to skip, for paging (default 0); pass the response's next_offset
+            back with the same query to fetch the next page.
+        all_hits: Return the COMPLETE result set in one call (for an explicit "ALL ..." request);
+            ignores limit, can't be combined with offset, and is refused above 10000 hits.
+            Ignored when `facets` is set.
+        include_computed_models: Also search computed structure models (AlphaFold etc.).
+        facets: Optional aggregation specs to return a breakdown / distribution of the matches
+            instead of hits (see the faceting note in the server instructions for the spec).
+        sort_by: Attribute path to sort by; omit to sort by relevance score.
+        sort_direction: "asc" (default) or "desc" for sort_by.
+        group_by: Collapse redundant polymer_entity hits into clusters (requires
+            return_type="polymer_entity"); see the other search tools for the values.
+        group_by_ranking: Which member to keep as each cluster's representative.
+
+    Returns:
+        {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
+        query_editor_url}; with `facets`, instead returns {total_count, facets, query_editor_url}.
+    """
+    body = queries.build_group_query(
+        services=[s.model_dump() for s in services],
+        logical_operator=logical_operator,
+        return_type=return_type,
+        rows=limit,
+        start=offset,
+        all_hits=all_hits,
+        include_computed=include_computed_models,
+        sort_by=sort_by,
+        sort_direction=sort_direction,
+        group_by=group_by,
+        group_by_ranking=group_by_ranking,
+        facets=facets,
+    )
+    if all_hits and not facets:
+        await _guard_all_hits(body, offset)
+    raw = await _post_search(body)
+    if facets:
+        return _format_facets(raw, body)
+    return _format(raw, body, None if all_hits else offset)
 
 
 @mcp.tool(annotations=READ_ONLY)

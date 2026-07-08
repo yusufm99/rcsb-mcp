@@ -6,12 +6,15 @@ of the live introspection calls — so depth-capping, cycle-guarding, keyword fi
 and the result cap are all exercised without touching the network.
 """
 import asyncio
+import json
 import sys
 import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from rcsb_mcp import server  # noqa: E402
+from pydantic import TypeAdapter, ValidationError  # noqa: E402
+
+from rcsb_mcp import queries, server  # noqa: E402
 
 
 # --- synthetic introspection shapes (what _field_descriptor/_unwrap_type expect) ---------- #
@@ -202,6 +205,70 @@ def test_enrich_syntax_error():
     print("ok: enrich syntax error")
 
 
+# --- rcsb_search_group: composable service specs + strict validation ---------------------- #
+def _group_tool_schema():
+    """The inputSchema advertised by the rcsb_search_group MCP tool."""
+    tools = asyncio.run(server.mcp.list_tools())
+    tool = next(t for t in tools if t.name == "rcsb_search_group")
+    return tool.inputSchema
+
+
+def test_group_tool_exposes_number_of_candidates():
+    # The field must be advertised through the tool's own JSON schema (not just the model),
+    # so a client/inspector can supply it.
+    schema_text = json.dumps(_group_tool_schema())
+    assert "number_of_candidates" in schema_text
+    # And it must live specifically on the structure service variant.
+    struct_schema = json.dumps(server.StructureService.model_json_schema())
+    assert "number_of_candidates" in struct_schema
+    print("ok: group tool exposes number_of_candidates")
+
+
+def test_group_tool_rejects_unknown_service_fields():
+    # extra="forbid" (via _ServiceSpec) turns a mistyped/unsupported key into a clear error
+    # instead of silently dropping it — the root cause of the number_of_candidates bug.
+    ta = TypeAdapter(list[server.SearchService])
+    # a good structure spec (with the now-supported field) validates
+    good = ta.validate_python(
+        [{"type": "structure", "entry_id": "6LU7", "assembly_id": "1",
+          "number_of_candidates": 2000}]
+    )
+    assert good[0].number_of_candidates == 2000
+    # a misspelled key is rejected, and the error names the offending field
+    try:
+        ta.validate_python([{"type": "structure", "entry_id": "6LU7",
+                             "number_of_candidate": 2000}])  # missing trailing 's'
+    except ValidationError as e:
+        assert "number_of_candidate" in str(e)
+    else:
+        raise AssertionError("expected ValidationError for an unknown service field")
+    # every service model forbids extras (shared base), spot-check another one
+    try:
+        ta.validate_python([{"type": "sequence", "sequence": "MTEY", "bogus": 1}])
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("expected ValidationError for unknown field on sequence service")
+    print("ok: group tool rejects unknown service fields")
+
+
+def test_group_number_of_candidates_end_to_end():
+    # From a typed spec (as the tool receives it) all the way into the generated query body:
+    # number_of_candidates=2000 must survive rather than being dropped.
+    ta = TypeAdapter(list[server.SearchService])
+    svcs = ta.validate_python(
+        [{"type": "structure", "entry_id": "6LU7", "assembly_id": "1",
+          "number_of_candidates": 2000}]
+    )
+    body = queries.build_group_query(
+        services=[s.model_dump() for s in svcs], return_type="polymer_entity"
+    )
+    params = body["query"]["parameters"]
+    assert params["number_of_candidates"] == 2000
+    assert params["value"] == {"entry_id": "6LU7", "assembly_id": "1"}
+    print("ok: number_of_candidates survives typed spec -> query body")
+
+
 if __name__ == "__main__":
     test_flatten_depth_and_traversal()
     test_flatten_cycle_guard()
@@ -215,4 +282,7 @@ if __name__ == "__main__":
     test_enrich_unknown_field()
     test_enrich_seqcoord_steer()
     test_enrich_syntax_error()
+    test_group_tool_exposes_number_of_candidates()
+    test_group_tool_rejects_unknown_service_fields()
+    test_group_number_of_candidates_end_to_end()
     print("\nAll server tests passed.")

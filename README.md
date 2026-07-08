@@ -32,7 +32,8 @@ Bank structures** — discover, inspect, and cross-reference — from LLM client
 | `rcsb_search_by_structure` | 3D shape-similarity search against a reference PDB assembly or chain. |
 | `rcsb_search_by_seqmotif` | Short **sequence**-motif search (PROSITE pattern, regex, or simple wildcards). |
 | `rcsb_search_strucmotif` | 3D **structural**-motif search: structures sharing a geometric arrangement of specific residues (e.g. a catalytic triad). |
-| `rcsb_search_advanced` | Escape hatch: run a raw Search API query body (`return_all_hits`, grouped results, deeply nested boolean queries, ...). |
+| `rcsb_search_group` | Compose **any mix** of services (fulltext, attribute, sequence, chemical, structure, seqmotif, strucmotif) into one AND/OR group query — e.g. sequence-similar **and** binds a ligand **and** from human, in a single call. |
+| `rcsb_search_advanced` | Escape hatch: run a raw Search API query body (`return_all_hits`, grouped results, deeply **nested** boolean queries, ...). |
 
 The two text tools (`rcsb_search_fulltext`, `rcsb_search_by_attribute`)
 also take `group_by_identity` (100/95/90/70/50/30) to return one representative

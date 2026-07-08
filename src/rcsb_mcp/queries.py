@@ -387,6 +387,166 @@ def build_combined_query(
     }
 
 
+# --------------------------------------------------------------------------- #
+# Service node builders (one primary terminal each). Split out from the
+# build_*_query functions so the SAME node can be either (a) refined with text
+# attributes and given its own request_options by its build_*_query, or (b)
+# composed with OTHER service nodes into an arbitrary boolean group by
+# build_group_query. Each returns just the query-node dict (no request_options).
+# --------------------------------------------------------------------------- #
+def _sequence_node(
+    sequence: str,
+    sequence_type: str = "protein",
+    identity_cutoff: float = 0.3,
+    evalue_cutoff: float = 1.0,
+) -> dict[str, Any]:
+    """Terminal node for an MMseqs2 sequence-similarity match."""
+    if sequence_type not in SEQUENCE_TYPES:
+        raise ValueError(f"sequence_type must be one of {sorted(SEQUENCE_TYPES)}")
+    if not 0.0 <= identity_cutoff <= 1.0:
+        raise ValueError("identity_cutoff must be between 0 and 1")
+    return {
+        "type": "terminal",
+        "service": "sequence",
+        "parameters": {
+            "value": sequence.strip().upper(),
+            "sequence_type": sequence_type,
+            "identity_cutoff": identity_cutoff,
+            "evalue_cutoff": evalue_cutoff,
+        },
+    }
+
+
+def _chemical_node(
+    value: str,
+    query_type: str = "descriptor",
+    descriptor_type: str = "SMILES",
+    match_type: str = "graph-relaxed",
+    match_subset: bool = False,
+) -> dict[str, Any]:
+    """Terminal node for a chemical descriptor/formula match."""
+    if query_type == "descriptor":
+        if descriptor_type not in {"SMILES", "InChI"}:
+            raise ValueError('descriptor_type must be "SMILES" or "InChI"')
+        if match_type not in CHEMICAL_MATCH_TYPES:
+            raise ValueError(f"match_type must be one of {sorted(CHEMICAL_MATCH_TYPES)}")
+        # SMILES/InChI are case-sensitive: strip only, never upper-case.
+        params: dict[str, Any] = {
+            "type": "descriptor",
+            "value": value.strip(),
+            "descriptor_type": descriptor_type,
+            "match_type": match_type,
+        }
+    elif query_type == "formula":
+        # Element symbols are case-sensitive (e.g. Co vs CO): do not upper-case.
+        params = {"type": "formula", "value": value.strip(), "match_subset": bool(match_subset)}
+    else:
+        raise ValueError('query_type must be "descriptor" or "formula"')
+    return {"type": "terminal", "service": "chemical", "parameters": params}
+
+
+def _structure_node(
+    entry_id: str,
+    assembly_id: str | None = None,
+    asym_id: str | None = None,
+    number_of_candidates: int | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Terminal node for a 3D shape-similarity match, plus its natural return_type.
+
+    Returns (node, default_return_type): "assembly" for an assembly reference or
+    "polymer_instance" for a chain reference. `number_of_candidates`, when given,
+    tunes how many pre-filter candidates the shape-match engine considers (a
+    sibling of `value` in the terminal parameters, per the Search API).
+    """
+    if assembly_id and asym_id:
+        raise ValueError("provide assembly_id or asym_id, not both")
+    eid = entry_id.strip().upper()
+    if asym_id:
+        value: dict[str, Any] = {"entry_id": eid, "asym_id": str(asym_id)}
+        default_return = "polymer_instance"
+    else:
+        value = {"entry_id": eid, "assembly_id": str(assembly_id or "1")}
+        default_return = "assembly"
+    params: dict[str, Any] = {"value": value}
+    if number_of_candidates is not None:
+        if number_of_candidates < 1:
+            raise ValueError("number_of_candidates must be >= 1")
+        params["number_of_candidates"] = number_of_candidates
+    node = {"type": "terminal", "service": "structure", "parameters": params}
+    return node, default_return
+
+
+def _seqmotif_node(
+    pattern: str,
+    pattern_type: str = "prosite",
+    sequence_type: str = "protein",
+) -> dict[str, Any]:
+    """Terminal node for a short sequence-motif match."""
+    if pattern_type not in SEQMOTIF_PATTERN_TYPES:
+        raise ValueError(f"pattern_type must be one of {sorted(SEQMOTIF_PATTERN_TYPES)}")
+    if sequence_type not in SEQUENCE_TYPES:
+        raise ValueError(f"sequence_type must be one of {sorted(SEQUENCE_TYPES)}")
+    return {
+        "type": "terminal",
+        "service": "seqmotif",
+        "parameters": {
+            "value": pattern.strip(),
+            "pattern_type": pattern_type,
+            "sequence_type": sequence_type,
+        },
+    }
+
+
+def _strucmotif_node(
+    entry_id: str,
+    residue_ids: list[dict[str, Any]],
+    backbone_distance_tolerance: int = 1,
+    side_chain_distance_tolerance: int = 1,
+    angle_tolerance: int = 1,
+    rmsd_cutoff: float = 2.0,
+    atom_pairing_scheme: str = "SIDE_CHAIN",
+    motif_pruning_strategy: str = "KRUSKAL",
+    exchanges: list[dict[str, Any]] | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Terminal node for a 3D structural-motif (residue-geometry) match."""
+    eid = str(entry_id).strip().upper()
+    if not eid:
+        raise ValueError("entry_id must be non-empty")
+    residues = [_strucmotif_residue(r) for r in (residue_ids or [])]
+    if not 2 <= len(residues) <= 10:
+        raise ValueError("provide between 2 and 10 residue_ids")
+    for nm, val in (
+        ("backbone_distance_tolerance", backbone_distance_tolerance),
+        ("side_chain_distance_tolerance", side_chain_distance_tolerance),
+        ("angle_tolerance", angle_tolerance),
+    ):
+        if not 0 <= val <= 3:
+            raise ValueError(f"{nm} must be an integer in 0..3")
+    if rmsd_cutoff < 0:
+        raise ValueError("rmsd_cutoff must be >= 0")
+    if atom_pairing_scheme not in STRUCMOTIF_ATOM_PAIRING:
+        raise ValueError(f"atom_pairing_scheme must be one of {sorted(STRUCMOTIF_ATOM_PAIRING)}")
+    if motif_pruning_strategy not in STRUCMOTIF_PRUNING:
+        raise ValueError(f"motif_pruning_strategy must be one of {sorted(STRUCMOTIF_PRUNING)}")
+    params: dict[str, Any] = {
+        "value": {"entry_id": eid, "residue_ids": residues},
+        "backbone_distance_tolerance": backbone_distance_tolerance,
+        "side_chain_distance_tolerance": side_chain_distance_tolerance,
+        "angle_tolerance": angle_tolerance,
+        "rmsd_cutoff": rmsd_cutoff,
+        "atom_pairing_scheme": atom_pairing_scheme,
+        "motif_pruning_strategy": motif_pruning_strategy,
+    }
+    if exchanges:
+        params["exchanges"] = exchanges
+    if limit is not None:
+        if limit < 0:
+            raise ValueError("limit must be >= 0")
+        params["limit"] = limit
+    return {"type": "terminal", "service": "strucmotif", "parameters": params}
+
+
 def build_sequence_query(
     sequence: str,
     sequence_type: str = "protein",
@@ -408,22 +568,9 @@ def build_sequence_query(
     identity_cutoff is a fraction in [0, 1]. sequence_type is one of
     "protein", "dna", "rna".
     """
-    if sequence_type not in SEQUENCE_TYPES:
-        raise ValueError(f"sequence_type must be one of {sorted(SEQUENCE_TYPES)}")
-    if not 0.0 <= identity_cutoff <= 1.0:
-        raise ValueError("identity_cutoff must be between 0 and 1")
     if return_type not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    node = {
-        "type": "terminal",
-        "service": "sequence",
-        "parameters": {
-            "value": sequence.strip().upper(),
-            "sequence_type": sequence_type,
-            "identity_cutoff": identity_cutoff,
-            "evalue_cutoff": evalue_cutoff,
-        },
-    }
+    node = _sequence_node(sequence, sequence_type, identity_cutoff, evalue_cutoff)
     options = _facet_options(facets) if facets else _request_options(
         start, rows, False, all_hits=all_hits, scoring_strategy="sequence",
         group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type)
@@ -461,24 +608,7 @@ def build_chemical_query(
     """
     if return_type not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    if query_type == "descriptor":
-        if descriptor_type not in {"SMILES", "InChI"}:
-            raise ValueError('descriptor_type must be "SMILES" or "InChI"')
-        if match_type not in CHEMICAL_MATCH_TYPES:
-            raise ValueError(f"match_type must be one of {sorted(CHEMICAL_MATCH_TYPES)}")
-        # SMILES/InChI are case-sensitive: strip only, never upper-case.
-        params: dict[str, Any] = {
-            "type": "descriptor",
-            "value": value.strip(),
-            "descriptor_type": descriptor_type,
-            "match_type": match_type,
-        }
-    elif query_type == "formula":
-        # Element symbols are case-sensitive (e.g. Co vs CO): do not upper-case.
-        params = {"type": "formula", "value": value.strip(), "match_subset": bool(match_subset)}
-    else:
-        raise ValueError('query_type must be "descriptor" or "formula"')
-    node = {"type": "terminal", "service": "chemical", "parameters": params}
+    node = _chemical_node(value, query_type, descriptor_type, match_type, match_subset)
     options = (_facet_options(facets) if facets
                else _request_options(start, rows, False, all_hits=all_hits, group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type, scoring_strategy="chemical"))
     return {
@@ -509,19 +639,10 @@ def build_structure_query(
     or entry + chain (asym_id="A"). Defaults to assembly "1" if neither is given.
     Returns assemblies (assembly reference) or polymer instances (chain reference).
     """
-    if assembly_id and asym_id:
-        raise ValueError("provide assembly_id or asym_id, not both")
-    eid = entry_id.strip().upper()
-    if asym_id:
-        value: dict[str, Any] = {"entry_id": eid, "asym_id": str(asym_id)}
-        default_return = "polymer_instance"
-    else:
-        value = {"entry_id": eid, "assembly_id": str(assembly_id or "1")}
-        default_return = "assembly"
+    node, default_return = _structure_node(entry_id, assembly_id, asym_id)
     rt = return_type or default_return
     if rt not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    node = {"type": "terminal", "service": "structure", "parameters": {"value": value}}
     options = (_facet_options(facets) if facets
                else _request_options(start, rows, False, all_hits=all_hits, group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type, scoring_strategy="structure"))
     return {
@@ -551,21 +672,9 @@ def build_seqmotif_query(
     Examples: pattern_type="prosite" value "C-x(2,4)-C-x(3)-[LIVMFYWC]...",
     pattern_type="regex" value "C..H[LIVF]", pattern_type="simple" value "NXS".
     """
-    if pattern_type not in SEQMOTIF_PATTERN_TYPES:
-        raise ValueError(f"pattern_type must be one of {sorted(SEQMOTIF_PATTERN_TYPES)}")
-    if sequence_type not in SEQUENCE_TYPES:
-        raise ValueError(f"sequence_type must be one of {sorted(SEQUENCE_TYPES)}")
     if return_type not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    node = {
-        "type": "terminal",
-        "service": "seqmotif",
-        "parameters": {
-            "value": pattern.strip(),
-            "pattern_type": pattern_type,
-            "sequence_type": sequence_type,
-        },
-    }
+    node = _seqmotif_node(pattern, pattern_type, sequence_type)
     options = _facet_options(facets) if facets else _request_options(start, rows, False, all_hits=all_hits, group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type)
     return {
         "query": _combine_service(node, attributes, logical_operator),
@@ -727,41 +836,17 @@ def build_strucmotif_query(
     """
     if return_type not in RETURN_TYPES:
         raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
-    eid = str(entry_id).strip().upper()
-    if not eid:
-        raise ValueError("entry_id must be non-empty")
-    residues = [_strucmotif_residue(r) for r in (residue_ids or [])]
-    if not 2 <= len(residues) <= 10:
-        raise ValueError("provide between 2 and 10 residue_ids")
-    for nm, val in (
-        ("backbone_distance_tolerance", backbone_distance_tolerance),
-        ("side_chain_distance_tolerance", side_chain_distance_tolerance),
-        ("angle_tolerance", angle_tolerance),
-    ):
-        if not 0 <= val <= 3:
-            raise ValueError(f"{nm} must be an integer in 0..3")
-    if rmsd_cutoff < 0:
-        raise ValueError("rmsd_cutoff must be >= 0")
-    if atom_pairing_scheme not in STRUCMOTIF_ATOM_PAIRING:
-        raise ValueError(f"atom_pairing_scheme must be one of {sorted(STRUCMOTIF_ATOM_PAIRING)}")
-    if motif_pruning_strategy not in STRUCMOTIF_PRUNING:
-        raise ValueError(f"motif_pruning_strategy must be one of {sorted(STRUCMOTIF_PRUNING)}")
-    params: dict[str, Any] = {
-        "value": {"entry_id": eid, "residue_ids": residues},
-        "backbone_distance_tolerance": backbone_distance_tolerance,
-        "side_chain_distance_tolerance": side_chain_distance_tolerance,
-        "angle_tolerance": angle_tolerance,
-        "rmsd_cutoff": rmsd_cutoff,
-        "atom_pairing_scheme": atom_pairing_scheme,
-        "motif_pruning_strategy": motif_pruning_strategy,
-    }
-    if exchanges:
-        params["exchanges"] = exchanges
-    if limit is not None:
-        if limit < 0:
-            raise ValueError("limit must be >= 0")
-        params["limit"] = limit
-    node = {"type": "terminal", "service": "strucmotif", "parameters": params}
+    node = _strucmotif_node(
+        entry_id, residue_ids,
+        backbone_distance_tolerance=backbone_distance_tolerance,
+        side_chain_distance_tolerance=side_chain_distance_tolerance,
+        angle_tolerance=angle_tolerance,
+        rmsd_cutoff=rmsd_cutoff,
+        atom_pairing_scheme=atom_pairing_scheme,
+        motif_pruning_strategy=motif_pruning_strategy,
+        exchanges=exchanges,
+        limit=limit,
+    )
     options = (_facet_options(facets) if facets
                else _request_options(start, rows, False, all_hits=all_hits, group_by=group_by, group_by_ranking=group_by_ranking, return_type=return_type, scoring_strategy="strucmotif"))
     return {
@@ -769,6 +854,189 @@ def build_strucmotif_query(
         "return_type": return_type,
         "request_options": options,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Composite (multi-service) queries — a group node over ANY mix of services.
+# --------------------------------------------------------------------------- #
+# Each typed rcsb_search_by_* tool builds ONE primary service terminal, refined
+# with text `attributes`. build_group_query goes further: it composes an
+# arbitrary list of service specs — full_text, structured attribute, sequence,
+# chemical, structure, seqmotif, strucmotif — into a single AND/OR group, so a
+# caller can ask e.g. "sequence-similar to X AND contains ligand Y AND from
+# human" in one query without hand-writing the raw Search API body.
+
+# Per-service scoring strategy the Search API tunes ranking with. Text services
+# (full_text / text / text_chem) carry none; seqmotif carries none either.
+_SERVICE_SCORING: dict[str, str] = {
+    "sequence": "sequence",
+    "chemical": "chemical",
+    "structure": "structure",
+    "strucmotif": "strucmotif",
+}
+
+
+def _service_node(spec: dict[str, Any]) -> dict[str, Any]:
+    """Build one query node from a service spec dict (dispatched on spec['type']).
+
+    Supported types and their fields:
+      fulltext   {value}
+      attribute  {attribute, operator, value?, negation?, case_sensitive?, chemical?}
+      sequence   {sequence, sequence_type?, identity_cutoff?, evalue_cutoff?}
+      chemical   {value, query_type?, descriptor_type?, match_type?, match_subset?}
+      structure  {entry_id, assembly_id?, asym_id?, number_of_candidates?}
+      seqmotif   {pattern, pattern_type?, sequence_type?}
+      strucmotif {entry_id, residue_ids, backbone_distance_tolerance?, ...,
+                  exchanges?, limit?}
+    """
+    if not isinstance(spec, dict):
+        raise ValueError("each service must be a dict with a 'type'")
+    kind = spec.get("type")
+    if kind == "fulltext":
+        value = spec.get("value")
+        if not value:
+            raise ValueError('a "fulltext" service requires a non-empty "value"')
+        return {"type": "terminal", "service": "full_text", "parameters": {"value": value}}
+    if kind == "attribute":
+        if not spec.get("attribute"):
+            raise ValueError('an "attribute" service requires "attribute"')
+        return _text_node(
+            spec["attribute"], spec.get("operator"), spec.get("value"),
+            service="text_chem" if spec.get("chemical") else "text",
+            negation=spec.get("negation", False),
+            case_sensitive=spec.get("case_sensitive", False),
+        )
+    if kind == "sequence":
+        if not spec.get("sequence"):
+            raise ValueError('a "sequence" service requires "sequence"')
+        return _sequence_node(
+            spec["sequence"], spec.get("sequence_type", "protein"),
+            spec.get("identity_cutoff", 0.3), spec.get("evalue_cutoff", 1.0),
+        )
+    if kind == "chemical":
+        if not spec.get("value"):
+            raise ValueError('a "chemical" service requires "value"')
+        return _chemical_node(
+            spec["value"], spec.get("query_type", "descriptor"),
+            spec.get("descriptor_type", "SMILES"), spec.get("match_type", "graph-relaxed"),
+            spec.get("match_subset", False),
+        )
+    if kind == "structure":
+        if not spec.get("entry_id"):
+            raise ValueError('a "structure" service requires "entry_id"')
+        node, _ = _structure_node(
+            spec["entry_id"], spec.get("assembly_id"), spec.get("asym_id"),
+            number_of_candidates=spec.get("number_of_candidates"),
+        )
+        return node
+    if kind == "seqmotif":
+        if not spec.get("pattern"):
+            raise ValueError('a "seqmotif" service requires "pattern"')
+        return _seqmotif_node(
+            spec["pattern"], spec.get("pattern_type", "prosite"),
+            spec.get("sequence_type", "protein"),
+        )
+    if kind == "strucmotif":
+        if not spec.get("entry_id"):
+            raise ValueError('a "strucmotif" service requires "entry_id"')
+        return _strucmotif_node(
+            spec["entry_id"], spec.get("residue_ids") or [],
+            backbone_distance_tolerance=spec.get("backbone_distance_tolerance", 1),
+            side_chain_distance_tolerance=spec.get("side_chain_distance_tolerance", 1),
+            angle_tolerance=spec.get("angle_tolerance", 1),
+            rmsd_cutoff=spec.get("rmsd_cutoff", 2.0),
+            atom_pairing_scheme=spec.get("atom_pairing_scheme", "SIDE_CHAIN"),
+            motif_pruning_strategy=spec.get("motif_pruning_strategy", "KRUSKAL"),
+            exchanges=spec.get("exchanges"),
+            limit=spec.get("limit"),
+        )
+    raise ValueError(
+        f"unknown service type {kind!r}; one of fulltext, attribute, sequence, "
+        "chemical, structure, seqmotif, strucmotif"
+    )
+
+
+def _group_scoring_strategy(nodes: list[dict[str, Any]]) -> str | None:
+    """Choose the scoring_strategy for a composite query from its service nodes.
+
+    A single scored service keeps its own strategy; a mix of scored services uses
+    "combined"; a group of only text/seqmotif nodes gets none (API default).
+    """
+    strategies = {
+        _SERVICE_SCORING[n["service"]] for n in nodes if n.get("service") in _SERVICE_SCORING
+    }
+    if not strategies:
+        return None
+    if len(strategies) == 1:
+        return next(iter(strategies))
+    return "combined"
+
+
+def build_group_query(
+    services: list[dict[str, Any]],
+    logical_operator: str = "and",
+    return_type: str = "entry",
+    rows: int = 10,
+    start: int = 0,
+    include_computed: bool = False,
+    all_hits: bool = False,
+    sort_by: str | None = None,
+    sort_direction: str = "asc",
+    group_by: str | None = None,
+    group_by_ranking: str | None = None,
+    facets: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Compose ANY mix of search services into one AND/OR group query.
+
+    `services` is a non-empty list of service-spec dicts, each dispatched by
+    _service_node on its "type" (fulltext, attribute, sequence, chemical,
+    structure, seqmotif, strucmotif). Each becomes one query node; a single spec
+    collapses to a plain terminal, several are wrapped in a "group" combined with
+    `logical_operator`. The remaining arguments mirror the other builders
+    (pagination / all_hits / sort / group_by / facets). The scoring_strategy is
+    derived from the mix of services (see _group_scoring_strategy).
+
+    Example (sequence-similar to a peptide AND binds heme AND from human):
+        build_group_query(
+            services=[
+                {"type": "sequence", "sequence": "MVLSPADKT...", "identity_cutoff": 0.4},
+                {"type": "chemical", "value": "HEM", "query_type": "formula",
+                 "match_subset": True},
+                {"type": "attribute",
+                 "attribute": "rcsb_entity_source_organism.taxonomy_lineage.id",
+                 "operator": "exact_match", "value": "9606"},
+            ],
+            logical_operator="and",
+            return_type="polymer_entity",
+        )
+    """
+    if return_type not in RETURN_TYPES:
+        raise ValueError(f"return_type must be one of {sorted(RETURN_TYPES)}")
+    if logical_operator not in {"and", "or"}:
+        raise ValueError('logical_operator must be "and" or "or"')
+    if not services:
+        raise ValueError("provide at least one service")
+    nodes = [_service_node(s) for s in services]
+    query = (
+        nodes[0] if len(nodes) == 1
+        else {"type": "group", "logical_operator": logical_operator, "nodes": nodes}
+    )
+    if facets:
+        options = _facet_options(facets, include_computed)
+    else:
+        options = _request_options(
+            start, rows, include_computed,
+            all_hits=all_hits,
+            scoring_strategy=_group_scoring_strategy(nodes),
+            group_by=group_by,
+            group_by_ranking=group_by_ranking,
+            return_type=return_type,
+        )
+        if sort_by:
+            if sort_direction not in {"asc", "desc"}:
+                raise ValueError('sort_direction must be "asc" or "desc"')
+            options["sort"] = [{"sort_by": sort_by, "direction": sort_direction}]
+    return {"query": query, "return_type": return_type, "request_options": options}
 
 
 # --------------------------------------------------------------------------- #

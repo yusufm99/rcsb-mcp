@@ -348,6 +348,146 @@ def test_chemical_attribute_service():
     print("ok: chemical text_chem service")
 
 
+def test_group_query_composes_services():
+    # A single service collapses to a bare terminal (no wrapping group).
+    solo = queries.build_group_query(
+        services=[{"type": "sequence", "sequence": "mtey", "identity_cutoff": 0.9}]
+    )
+    assert solo["query"]["type"] == "terminal" and solo["query"]["service"] == "sequence"
+    assert solo["query"]["parameters"]["value"] == "MTEY"  # node builder still normalizes
+    # A mix of services -> one group combined with logical_operator, one node each.
+    q = queries.build_group_query(
+        services=[
+            {"type": "sequence", "sequence": "MVLSPADKT", "identity_cutoff": 0.4},
+            {"type": "chemical", "value": "HEM", "query_type": "formula", "match_subset": True},
+            {"type": "attribute",
+             "attribute": "rcsb_entity_source_organism.taxonomy_lineage.id",
+             "operator": "exact_match", "value": "9606"},
+            {"type": "fulltext", "value": "oxygen transport"},
+        ],
+        logical_operator="and",
+        return_type="polymer_entity",
+    )
+    grp = q["query"]
+    assert grp["type"] == "group" and grp["logical_operator"] == "and"
+    assert [n["service"] for n in grp["nodes"]] == [
+        "sequence", "chemical", "text", "full_text",
+    ]
+    assert q["return_type"] == "polymer_entity"
+    # taxonomy id stays a string (type-driven coercion still applies inside the group).
+    assert grp["nodes"][2]["parameters"]["value"] == "9606"
+    # Mixed scored services -> "combined" scoring strategy.
+    assert q["request_options"]["scoring_strategy"] == "combined"
+    print("ok: group query composes services")
+
+
+def test_group_query_scoring_and_options():
+    # A single scored service keeps its own strategy.
+    seq = queries.build_group_query(services=[{"type": "sequence", "sequence": "MTEY"}])
+    assert seq["request_options"]["scoring_strategy"] == "sequence"
+    # Only text/seqmotif nodes -> no scoring_strategy key (API default).
+    txt = queries.build_group_query(
+        services=[
+            {"type": "fulltext", "value": "kinase"},
+            {"type": "seqmotif", "pattern": "NXS", "pattern_type": "simple"},
+        ],
+        logical_operator="or",
+    )
+    assert "scoring_strategy" not in txt["request_options"]
+    assert txt["query"]["logical_operator"] == "or"
+    # all_hits + sort + group_by flow through to request_options like the other builders.
+    opts = queries.build_group_query(
+        services=[{"type": "structure", "entry_id": "4hhb", "asym_id": "A"}],
+        return_type="polymer_entity", all_hits=True, group_by="seqid_30",
+    )["request_options"]
+    assert opts["return_all_hits"] is True and "paginate" not in opts
+    assert opts["group_by"]["aggregation_method"] == "sequence_identity"
+    # chemical=True on an attribute service switches it to text_chem.
+    chem = queries.build_group_query(
+        services=[{"type": "attribute", "attribute": "chem_comp.formula_weight",
+                   "operator": "less", "value": 300, "chemical": True},
+                  {"type": "fulltext", "value": "aspirin"}],
+        return_type="mol_definition",
+    )
+    assert chem["query"]["nodes"][0]["service"] == "text_chem"
+    # facets on a group query -> rows 0 + validated facets, no hits.
+    fac = queries.build_group_query(
+        services=[{"type": "fulltext", "value": "ribosome"},
+                  {"type": "structure", "entry_id": "4HHB"}],
+        facets=[{"name": "M", "aggregation_type": "terms", "attribute": "exptl.method"}],
+    )
+    assert fac["request_options"]["paginate"] == {"start": 0, "rows": 0}
+    assert fac["request_options"]["facets"][0]["attribute"] == "exptl.method"
+    print("ok: group query scoring + options")
+
+
+def test_group_query_structure_number_of_candidates():
+    # Regression: number_of_candidates on a structure service must survive into the
+    # generated structure terminal's parameters (was silently dropped).
+    body = queries.build_group_query(
+        services=[{"type": "structure", "entry_id": "6LU7", "assembly_id": "1",
+                   "number_of_candidates": 2000}],
+        return_type="polymer_entity",
+    )
+    params = body["query"]["parameters"]
+    assert params["value"] == {"entry_id": "6LU7", "assembly_id": "1"}
+    assert params["number_of_candidates"] == 2000  # sibling of value, not dropped
+    # Omitted -> the key is absent (API default), not a null.
+    bare = queries.build_group_query(
+        services=[{"type": "structure", "entry_id": "6LU7"}]
+    )
+    assert "number_of_candidates" not in bare["query"]["parameters"]
+    # The node builder still validates it.
+    try:
+        queries.build_group_query(
+            services=[{"type": "structure", "entry_id": "6LU7", "number_of_candidates": 0}]
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for number_of_candidates < 1")
+    print("ok: group query structure number_of_candidates")
+
+
+def test_group_query_strucmotif_exchanges_limit():
+    # Regression: exchanges/limit passed via a strucmotif service spec reach the terminal.
+    body = queries.build_group_query(
+        services=[{"type": "strucmotif", "entry_id": "2MNR",
+                   "residue_ids": [{"label_asym_id": "A", "label_seq_id": 162},
+                                   {"label_asym_id": "A", "label_seq_id": 193}],
+                   "exchanges": [{"residue_id": {"label_asym_id": "A", "label_seq_id": 162},
+                                  "allowed": ["LYS", "ARG"]}],
+                   "limit": 50}],
+    )
+    p = body["query"]["parameters"]
+    assert p["limit"] == 50
+    assert p["exchanges"][0]["allowed"] == ["LYS", "ARG"]
+    print("ok: group query strucmotif exchanges/limit")
+
+
+def test_group_query_validation():
+    for bad in (
+        lambda: queries.build_group_query(services=[]),                       # no services
+        lambda: queries.build_group_query(services=[{"type": "bogus"}]),      # unknown type
+        lambda: queries.build_group_query(services=[{"type": "fulltext"}]),   # missing value
+        lambda: queries.build_group_query(                                    # bad return_type
+            services=[{"type": "fulltext", "value": "x"}], return_type="bogus"),
+        lambda: queries.build_group_query(                                    # bad logical_operator
+            services=[{"type": "fulltext", "value": "x"}], logical_operator="xor"),
+        lambda: queries.build_group_query(                                    # bad nested enum
+            services=[{"type": "sequence", "sequence": "X", "sequence_type": "zzz"}]),
+        lambda: queries.build_group_query(                                    # missing required field
+            services=[{"type": "strucmotif", "entry_id": "2MNR", "residue_ids": [
+                {"label_asym_id": "A", "label_seq_id": 1}]}]),               # only one residue
+    ):
+        try:
+            bad()
+        except ValueError:
+            continue
+        raise AssertionError("expected ValueError")
+    print("ok: group query validation")
+
+
 def test_validation_errors():
     for bad in (
         lambda: _ft("x", return_type="bogus"),
@@ -631,6 +771,11 @@ if __name__ == "__main__":
     test_facet_query()
     test_count_query()
     test_strucmotif()
+    test_group_query_composes_services()
+    test_group_query_scoring_and_options()
+    test_group_query_structure_number_of_candidates()
+    test_group_query_strucmotif_exchanges_limit()
+    test_group_query_validation()
     test_service_refinement_and_facets()
     test_chemical_attribute_service()
     test_validation_errors()
