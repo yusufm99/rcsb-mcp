@@ -50,6 +50,13 @@ search with `limit=1` and read it), and passing `facets` returns a breakdown
 service tools (sequence, chemical, structure, seq/struc-motif) also take optional `attributes`
 filters, so e.g. a sequence search can be restricted to an organism in one call.
 
+**Sorting** is likewise available on **every `rcsb_search_*` tool** via `sort_by` (an
+attribute path) + `sort_direction` (`asc`/`desc`), replacing the default score ordering (for
+the similarity searches this overrides the similarity-ranked order). Only attributes indexed
+for sorting work — those exposing `exact_match` (strings) or `equals` (numbers/dates) in
+`rcsb_list_pdb_search_attributes`; sorting is not available for `return_type="mol_definition"`
+(chemical-component results are ranked by score only).
+
 **Paging.** Every search tool that returns hits accepts `limit` (1–100, default
 10) and `offset` (default 0). Each response reports `total_count`, `has_more`,
 and `next_offset`; to fetch the next page, call the tool again with the same

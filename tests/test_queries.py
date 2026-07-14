@@ -273,6 +273,64 @@ def test_seqmotif():
     print("ok: seqmotif")
 
 
+def test_sort_across_builders():
+    # sort_by/sort_direction is a general Search-API request option: it threads through
+    # EVERY search builder into request_options.sort, replacing the default score order,
+    # regardless of the search service (text, sequence, structure, seqmotif, strucmotif).
+    res = "rcsb_entry_info.resolution_combined"
+    want = [{"sort_by": res, "direction": "asc"}]
+    two_residues = [{"label_asym_id": "A", "label_seq_id": 1},
+                    {"label_asym_id": "A", "label_seq_id": 2}]
+    cases = {
+        "combined/full_text": queries.build_combined_query(full_text="kinase", sort_by=res),
+        "combined/attribute": queries.build_combined_query(
+            filters=[{"attribute": "exptl.method", "operator": "exact_match",
+                      "value": "X-RAY DIFFRACTION"}], sort_by=res),
+        "sequence": queries.build_sequence_query("MVLS", sort_by=res),
+        "structure": queries.build_structure_query("4HHB", assembly_id="1", sort_by=res),
+        "seqmotif": queries.build_seqmotif_query("C..H[LIVF]", pattern_type="regex", sort_by=res),
+        "strucmotif": queries.build_strucmotif_query("2MNR", two_residues, sort_by=res),
+        # chemical must target a non-mol_definition return_type to be sortable (see guard below)
+        "chemical": queries.build_chemical_query(
+            "c1ccccc1", return_type="polymer_entity", sort_by=res),
+    }
+    for name, q in cases.items():
+        assert q["request_options"]["sort"] == want, name
+
+    # sort_direction is honored
+    q = queries.build_sequence_query("MVLS", sort_by=res, sort_direction="desc")
+    assert q["request_options"]["sort"] == [{"sort_by": res, "direction": "desc"}]
+
+    # omitting sort_by keeps the default score ordering on every builder
+    assert queries.build_structure_query("4HHB")["request_options"]["sort"] == \
+        [{"sort_by": "score", "direction": "desc"}]
+
+    # a facet (aggregation-only) query returns no hit ordering — sort_by is not applied there
+    fq = queries.build_sequence_query(
+        "MVLS", sort_by=res,
+        facets=[{"name": "m", "aggregation_type": "terms", "attribute": "exptl.method"}])
+    assert "sort" not in fq["request_options"]
+
+    # group_by_ranking and the top-level sort are INDEPENDENT: a ranking must NOT leak into
+    # the result ordering (regression guard against sort_by param/local shadowing). With no
+    # caller sort_by, the top-level order stays the default score sort.
+    g = queries.build_sequence_query(
+        "MVLS", return_type="polymer_entity", group_by="seqid_90", group_by_ranking="resolution")
+    assert g["request_options"]["sort"] == [{"sort_by": "score", "direction": "desc"}]
+    assert g["request_options"]["group_by"]["ranking_criteria_type"] == \
+        {"sort_by": res, "direction": "asc"}
+    # a caller sort_by orders the representatives while the ranking still picks them
+    gs = queries.build_sequence_query(
+        "MVLS", return_type="polymer_entity", group_by="seqid_90",
+        group_by_ranking="resolution", sort_by="rcsb_accession_info.initial_release_date",
+        sort_direction="desc")
+    assert gs["request_options"]["sort"] == \
+        [{"sort_by": "rcsb_accession_info.initial_release_date", "direction": "desc"}]
+    assert gs["request_options"]["group_by"]["ranking_criteria_type"] == \
+        {"sort_by": res, "direction": "asc"}
+    print("ok: sort across builders")
+
+
 def test_facet_query():
     q = queries.build_facet_query(
         facets=[
@@ -419,6 +477,15 @@ def test_validation_errors():
         lambda: queries.build_strucmotif_query(
             "2MNR", [{"label_asym_id": "A"}, {"label_asym_id": "A", "label_seq_id": 2}]
         ),  # residue missing label_seq_id
+        lambda: queries.build_chemical_query(
+            "c1ccccc1", sort_by="rcsb_entry_info.resolution_combined"
+        ),  # sort_by on the default mol_definition return_type is rejected
+        lambda: queries.build_combined_query(
+            full_text="x", return_type="mol_definition", sort_by="chem_comp.formula_weight"
+        ),  # sort_by is unsupported for mol_definition results
+        lambda: queries.build_sequence_query(
+            "x", sort_by="rcsb_entry_info.resolution_combined", sort_direction="sideways"
+        ),  # bad sort_direction
     ):
         try:
             bad()
@@ -645,6 +712,7 @@ if __name__ == "__main__":
     test_chemical()
     test_structure()
     test_seqmotif()
+    test_sort_across_builders()
     test_facet_query()
     test_count_query()
     test_strucmotif()

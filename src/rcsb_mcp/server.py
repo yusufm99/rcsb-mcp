@@ -976,9 +976,13 @@ async def rcsb_search_fulltext(
             text_chem service; usually pair with return_type="mol_definition").
         facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
             hits (see the faceting note in the server instructions for the spec).
-        sort_by: Attribute path to sort by (e.g. "rcsb_entry_info.resolution_combined");
-            omit to sort by relevance score.
-        sort_direction: "asc" (default) or "desc" for sort_by.
+        sort_by: Attribute path to order the hits by (e.g.
+            "rcsb_entry_info.resolution_combined"); omit to sort by relevance score. Only
+            SORTABLE attributes work: those listing exact_match (strings) or equals
+            (numbers/dates) among their operators in rcsb_list_pdb_search_attributes;
+            full-text-only attributes (e.g. struct.title) are rejected. Not supported with
+            return_type="mol_definition" (chemical-component results are ranked by score only).
+        sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
         group_by: Collapse redundant polymer_entity hits into clusters, returning one
             representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
             (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
@@ -1410,6 +1414,8 @@ async def rcsb_search_by_attribute(
     group_by_ranking: GroupByRanking | None = None,
     chemical: bool = False,
     facets: list[dict[str, Any]] | None = None,
+    sort_by: str | None = None,
+    sort_direction: SortDirection = "asc",
 ) -> dict[str, Any]:
     """Search by one or more structured attribute conditions combined with a single AND/OR —
     preferred over rcsb_search_fulltext whenever the request resolves to clear attribute(s)
@@ -1473,6 +1479,15 @@ async def rcsb_search_by_attribute(
             Switches to the text_chem service; usually pair with return_type="mol_definition".
         facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
             hits (see the faceting note in the server instructions for the spec).
+        sort_by: Attribute path to order the hits by (e.g.
+            "rcsb_entry_info.resolution_combined"). A pure attribute filter is a boolean match,
+            so hits otherwise come back in an essentially arbitrary (near-uniform score)
+            order — set this for "best resolution first", "newest first", and similar. Only
+            SORTABLE attributes work: those listing exact_match (strings) or equals
+            (numbers/dates) among their operators in rcsb_list_pdb_search_attributes;
+            full-text-only attributes (e.g. struct.title) are rejected. Not supported with
+            return_type="mol_definition" (e.g. chemical=True) — those results sort by score only.
+        sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1496,6 +1511,8 @@ async def rcsb_search_by_attribute(
         group_by_ranking=group_by_ranking,
         chemical=chemical,
         facets=facets,
+        sort_by=sort_by,
+        sort_direction=sort_direction,
     )
     if all_hits:
         await _guard_all_hits(body, offset)
@@ -1518,6 +1535,8 @@ async def rcsb_search_by_sequence(
     attributes: list[AttributeFilter] | None = None,
     logical_operator: LogicalOperator = "and",
     facets: list[dict[str, Any]] | None = None,
+    sort_by: str | None = None,
+    sort_direction: SortDirection = "asc",
     group_by: GroupBy | None = None,
     group_by_ranking: GroupByRanking | None = None,
 ) -> dict[str, Any]:
@@ -1556,6 +1575,15 @@ async def rcsb_search_by_sequence(
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
             there).
+        sort_by: Attribute path to order the hits by (e.g.
+            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
+            for similarity searches this overrides the similarity-ranked order (each hit's
+            score is still returned). Omit to keep the default order. Only SORTABLE attributes
+            work: those listing exact_match (strings) or equals (numbers/dates) among their
+            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
+            struct.title) are rejected. Not supported with return_type="mol_definition"
+            (chemical-component results are ranked by score only).
+        sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1573,6 +1601,8 @@ async def rcsb_search_by_sequence(
         attributes=_filter_dicts(attributes),
         logical_operator=logical_operator,
         facets=facets,
+        sort_by=sort_by,
+        sort_direction=sort_direction,
         group_by=group_by,
         group_by_ranking=group_by_ranking,
     )
@@ -1598,6 +1628,8 @@ async def rcsb_search_by_chemical(
     attributes: list[AttributeFilter] | None = None,
     logical_operator: LogicalOperator = "and",
     facets: list[dict[str, Any]] | None = None,
+    sort_by: str | None = None,
+    sort_direction: SortDirection = "asc",
     group_by: GroupBy | None = None,
     group_by_ranking: GroupByRanking | None = None,
 ) -> dict[str, Any]:
@@ -1642,6 +1674,15 @@ async def rcsb_search_by_chemical(
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
             there).
+        sort_by: Attribute path to order the hits by (e.g.
+            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
+            for similarity searches this overrides the similarity-ranked order (each hit's
+            score is still returned). Omit to keep the default order. Only SORTABLE attributes
+            work: those listing exact_match (strings) or equals (numbers/dates) among their
+            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
+            struct.title) are rejected. Not supported with return_type="mol_definition"
+            (chemical-component results are ranked by score only).
+        sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1660,6 +1701,8 @@ async def rcsb_search_by_chemical(
         attributes=_filter_dicts(attributes),
         logical_operator=logical_operator,
         facets=facets,
+        sort_by=sort_by,
+        sort_direction=sort_direction,
         group_by=group_by,
         group_by_ranking=group_by_ranking,
     )
@@ -1683,6 +1726,8 @@ async def rcsb_search_by_structure(
     attributes: list[AttributeFilter] | None = None,
     logical_operator: LogicalOperator = "and",
     facets: list[dict[str, Any]] | None = None,
+    sort_by: str | None = None,
+    sort_direction: SortDirection = "asc",
     group_by: GroupBy | None = None,
     group_by_ranking: GroupByRanking | None = None,
 ) -> dict[str, Any]:
@@ -1722,6 +1767,15 @@ async def rcsb_search_by_structure(
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
             there).
+        sort_by: Attribute path to order the hits by (e.g.
+            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
+            for similarity searches this overrides the similarity-ranked order (each hit's
+            score is still returned). Omit to keep the default order. Only SORTABLE attributes
+            work: those listing exact_match (strings) or equals (numbers/dates) among their
+            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
+            struct.title) are rejected. Not supported with return_type="mol_definition"
+            (chemical-component results are ranked by score only).
+        sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1738,6 +1792,8 @@ async def rcsb_search_by_structure(
         attributes=_filter_dicts(attributes),
         logical_operator=logical_operator,
         facets=facets,
+        sort_by=sort_by,
+        sort_direction=sort_direction,
         group_by=group_by,
         group_by_ranking=group_by_ranking,
     )
@@ -1761,6 +1817,8 @@ async def rcsb_search_by_seqmotif(
     attributes: list[AttributeFilter] | None = None,
     logical_operator: LogicalOperator = "and",
     facets: list[dict[str, Any]] | None = None,
+    sort_by: str | None = None,
+    sort_direction: SortDirection = "asc",
     group_by: GroupBy | None = None,
     group_by_ranking: GroupByRanking | None = None,
 ) -> dict[str, Any]:
@@ -1798,6 +1856,15 @@ async def rcsb_search_by_seqmotif(
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
             there).
+        sort_by: Attribute path to order the hits by (e.g.
+            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
+            for similarity searches this overrides the similarity-ranked order (each hit's
+            score is still returned). Omit to keep the default order. Only SORTABLE attributes
+            work: those listing exact_match (strings) or equals (numbers/dates) among their
+            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
+            struct.title) are rejected. Not supported with return_type="mol_definition"
+            (chemical-component results are ranked by score only).
+        sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1814,6 +1881,8 @@ async def rcsb_search_by_seqmotif(
         attributes=_filter_dicts(attributes),
         logical_operator=logical_operator,
         facets=facets,
+        sort_by=sort_by,
+        sort_direction=sort_direction,
         group_by=group_by,
         group_by_ranking=group_by_ranking,
     )
@@ -1881,6 +1950,8 @@ async def rcsb_search_strucmotif(
     attributes: list[AttributeFilter] | None = None,
     logical_operator: LogicalOperator = "and",
     facets: list[dict[str, Any]] | None = None,
+    sort_by: str | None = None,
+    sort_direction: SortDirection = "asc",
     group_by: GroupBy | None = None,
     group_by_ranking: GroupByRanking | None = None,
 ) -> dict[str, Any]:
@@ -1936,6 +2007,15 @@ async def rcsb_search_strucmotif(
             "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
             relevant biological sequence — requires group_by="uniprot", and recommended
             there).
+        sort_by: Attribute path to order the hits by (e.g.
+            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
+            for similarity searches this overrides the similarity-ranked order (each hit's
+            score is still returned). Omit to keep the default order. Only SORTABLE attributes
+            work: those listing exact_match (strings) or equals (numbers/dates) among their
+            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
+            struct.title) are rejected. Not supported with return_type="mol_definition"
+            (chemical-component results are ranked by score only).
+        sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
@@ -1957,6 +2037,8 @@ async def rcsb_search_strucmotif(
         attributes=_filter_dicts(attributes),
         logical_operator=logical_operator,
         facets=facets,
+        sort_by=sort_by,
+        sort_direction=sort_direction,
         group_by=group_by,
         group_by_ranking=group_by_ranking,
     )
