@@ -915,89 +915,52 @@ async def rcsb_search_fulltext(
     refined with structured attribute filters.
 
     Best for broad or exploratory keyword lookups. Pass `attributes` to AND/OR the keyword
-    with structured conditions (organism, resolution, method, dates, ...) in one query. When
-    a request has NO keyword (only attributes), use rcsb_search_by_attribute; when it resolves
-    to a clear attribute and value, prefer structured search — call
-    rcsb_list_pdb_search_attributes first to find the exact path and operators (more precise,
-    avoids spurious keyword matches). For NESTED boolean logic or other services
-    (sequence/structure/chemical/motif), use rcsb_search_advanced.
+    with structured conditions (organism, resolution, method, dates, ...) in one query. When a
+    request has NO keyword (only attributes), use rcsb_search_by_attribute; when it resolves to
+    a clear attribute/value, prefer structured search (call rcsb_list_pdb_search_attributes for
+    the exact path — more precise, avoids spurious keyword matches). For NESTED boolean logic or
+    other services (sequence/structure/chemical/motif), use rcsb_search_advanced.
 
-    BEFORE keyword-searching a biological CONCEPT, try to resolve it to an ontology id first
-    and filter on the annotation (far more precise):
-      - disease / condition (e.g. "diabetes", "cancer")   -> rcsb_find_disease_terms
-      - molecular function / process / location            -> rcsb_find_go_terms
-      - protein domain / family / fold                     -> rcsb_find_interpro_domains
-      - enzyme / catalyzed reaction                        -> rcsb_find_enzyme_classes
-      - organism common name / clade (e.g. "human", "mammals") -> rcsb_find_organisms
-    Each returns ids to use as an `attributes` filter on the matching annotation attribute.
-    If a resolver finds no usable match (count 0, or all pdb_entry_count 0), the concept isn't
-    covered by that ontology — THEN fall back to a plain keyword search here for the concept.
-
-    For search for an assembly / complex / multi-subunit machine / multimer (or any other term indicating a structure
-    composed of multiple subunits / proteins) add rcsb_assembly_info.* to `attributes`:
-    - rcsb_assembly_info.polymer_entity_instance_count_protein >= N (total protein chains),
-    - rcsb_assembly_info.polymer_entity_count_protein >= M (distinct subunits),
-    - rcsb_assembly_info.polymer_composition exact_match "heteromeric protein" | "homomeric protein"
-    combine these as needed to search for multimeric structures.
-
-    Matching spans ALL text annotations, so a hit may be a spurious keyword match rather than a
-    real answer. The response carries identifiers + scores only, so after searching, JUDGE each
-    hit's relevance yourself: fetch its title (and, for borderline cases, its PubMed abstract)
-    with rcsb_get_entries (-> struct.title / pubmed.rcsb_pubmed_abstract_text); decide whether
-    that text actually supports the user's question, and treat `score` as only a weak hint.
-    `score` is an ElasticSearch text-relevance score (how well a hit's text matched the query),
-    NOT a measure of biological importance, structural quality, or significance — never tell the
-    user one hit is more important/better than another because its score is higher.
+    BEFORE keyword-searching a biological CONCEPT (disease/function/domain/enzyme/organism),
+    resolve it to an ontology id and filter on the annotation instead — see the resolver and
+    assembly/multimer guidance in the server instructions. Matching spans ALL text annotations,
+    so judge each hit yourself; a high `score` is text-relevance, NOT biological importance —
+    never tell the user one hit is better than another because its score is higher.
 
     Args:
-        query: Free-text terms matched (case-insensitively) against all text annotations.
-            Quote a multi-word phrase to require the words adjacent/in order (e.g.
-            '"DNA polymerase"'); separate words narrow the results (most must match).
-            Trailing '*' is a prefix wildcard. AND/OR/NOT are NOT boolean operators here —
-            for boolean logic across conditions use `attributes` (flat) or rcsb_search_advanced.
-        attributes: Optional structured conditions combined with the keyword — a list of
-            AttributeFilter {attribute, operator, value, negation?, case_sensitive?} (see
+        query: Free-text terms matched (case-insensitively) against all text annotations. Quote
+            a phrase to require adjacency (e.g. '"DNA polymerase"'); separate words narrow the
+            results; trailing '*' is a prefix wildcard. AND/OR/NOT are NOT boolean operators here.
+        attributes: Optional structured conditions combined with the keyword — AttributeFilter
+            {attribute, operator, value, negation?, case_sensitive?} (see
             rcsb_search_by_attribute / rcsb_list_pdb_search_attributes for paths and operators).
-        logical_operator: Combine the keyword and all attribute conditions with "and"
-            (default) or "or".
-        return_type: What to return (default "entry"); one of entry, polymer_entity,
-            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
-            "Return types and fetching details" note in the server instructions).
+        logical_operator: Combine the keyword with the attribute conditions (default "and").
+        return_type: What to return (default "entry"); see the "Return types and fetching
+            details" note in the server instructions.
         limit: Max number of hits to return (1-100).
-        offset: Number of hits to skip, for paging (default 0). The response's
-            next_offset/has_more report whether more pages remain; pass next_offset
-            back here with the same query to fetch the next page.
-        all_hits: Return the COMPLETE result set in one call, for an explicit "ALL ..."
-            request. Ignores limit and omits the paging fields; can't be combined with
-            offset (the Search API rejects pagination here). Refused above 10000 hits —
-            narrow the query, aggregate by passing `facets`, or page instead.
+        offset: Number of hits to skip, for paging; pass the response's next_offset back with
+            the same query to fetch the next page.
+        all_hits: Return the COMPLETE result set in one call, for an explicit "ALL ..." request.
+            Ignores limit and omits paging; can't be combined with offset (the Search API rejects
+            pagination here); refused above 10000 hits — narrow, aggregate with `facets`, or page.
         include_computed_models: Also search computed structure models (AlphaFold etc.).
-        chemical: Set True when `attributes` target chemical-component attributes (the
-            text_chem service; usually pair with return_type="mol_definition").
-        facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
-            hits (see the faceting note in the server instructions for the spec).
-        sort_by: Attribute path to order the hits by (e.g.
-            "rcsb_entry_info.resolution_combined"); omit to sort by relevance score. Only
-            SORTABLE attributes work: those listing exact_match (strings) or equals
-            (numbers/dates) among their operators in rcsb_list_pdb_search_attributes;
-            full-text-only attributes (e.g. struct.title) are rejected. Not supported with
-            return_type="mol_definition" (chemical-component results are ranked by score only).
+        chemical: Set True when `attributes` target chemical-component attributes (the text_chem
+            service; usually pair with return_type="mol_definition").
+        facets: Optional aggregation specs to return a breakdown / distribution instead of hits
+            (see the faceting note in the server instructions for the spec).
+        sort_by: Attribute path to order the hits by; omit to sort by relevance score. Only
+            SORTABLE attributes work: those listing exact_match (strings) or equals (numbers/
+            dates) in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
+            struct.title) and return_type="mol_definition" are rejected.
         sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
-        group_by: Collapse redundant polymer_entity hits into clusters, returning one
-            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
-            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
-            Only available with return_type="polymer_entity".
-        group_by_ranking: Which member to keep as each cluster's representative (each ranking
-            has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
-            "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
-            relevant biological sequence — requires group_by="uniprot", and recommended
-            there).
+        group_by, group_by_ranking: Collapse redundant polymer_entity hits into clusters, one
+            representative each (needs return_type="polymer_entity") — see the grouping note in
+            the server instructions.
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
-        query_editor_url}. Hits are identifiers only — batch them into rcsb_get_entries
-        (or the rcsb_get_* tool matching return_type) for titles and other metadata.
-        With all_hits, the offset/has_more/next_offset paging fields are omitted. With `facets`,
-        instead returns {total_count, facets, query_editor_url}.
+        query_editor_url}; hits are ids only — batch them into rcsb_get_entries (or the
+        rcsb_get_* tool matching return_type). all_hits/facets response variants: see the
+        server instructions.
     """
     body = queries.build_combined_query(
         full_text=query,
@@ -1422,16 +1385,11 @@ async def rcsb_search_by_attribute(
     and value(s). If you don't know a path or its operators, call rcsb_list_pdb_search_attributes
     first. For NESTED boolean logic use rcsb_search_advanced.
 
-    For a biological concept, resolve it to an ontology id first:
-        - disease -> rcsb_find_disease_terms;
-        - function/process/location -> rcsb_find_go_terms;
-        - domain/family/fold -> rcsb_find_interpro_domains;
-        - enzyme/reaction -> rcsb_find_enzyme_classes;
-        - organism common name/clade -> rcsb_find_organisms.
-    and use it on the matching annotation attribute, see rcsb_list_pdb_search_attributes.
-    If a resolver returns no usable id, or a concept/annotation filter yields no hits, fall
-    back to rcsb_search_fulltext for the concept. (For ordinary constraints — resolution, organism,
-    dates — an empty result is a valid answer: report it, don't keyword-search instead.)
+    For a biological concept, resolve it to an ontology id first and filter on the matching
+    annotation (see the resolver guidance in the server instructions). If a resolver returns no
+    usable id, or a concept/annotation filter yields no hits, fall back to rcsb_search_fulltext
+    for the concept. (For ordinary constraints — resolution, organism, dates — an empty result
+    is a valid answer: report it, don't keyword-search instead.)
 
     Example ("human X-ray structures better than 2 A"):
         attributes=[
@@ -1454,50 +1412,35 @@ async def rcsb_search_by_attribute(
             {from, to, include_lower, include_upper} object (bounds EXCLUSIVE unless the
             include flags are true). See rcsb_list_pdb_search_attributes for paths/operators.
         logical_operator: Combine the conditions with "and" (default) or "or".
-        return_type: What to return (default "entry"); one of entry, polymer_entity,
-            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
-            server instructions). E.g. return_type="entry" with a ligand attribute
-            finds the structures that contain it.
+        return_type: What to return (default "entry"); see the "Return types and fetching
+            details" note in the server instructions. E.g. return_type="entry" with a ligand
+            attribute finds the structures that contain it.
         limit: Max hits (1-100).
-        offset: Number of hits to skip, for paging (default 0); pass the response's
-            next_offset back with the same query to fetch the next page.
-        all_hits: Return the COMPLETE result set in one call, for an explicit "ALL ..."
-            request. Ignores limit and omits the paging fields; can't be combined with
-            offset (the Search API rejects pagination here). Refused above 10000 hits —
-            narrow the query, aggregate by passing `facets`, or page instead.
-        group_by: Collapse redundant polymer_entity hits into clusters, returning one
-            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
-            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
-            Only available with return_type="polymer_entity".
-        group_by_ranking: Which member to keep as each cluster's representative (each ranking
-            has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
-            "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
-            relevant biological sequence — requires group_by="uniprot", and recommended
-            there).
+        offset: Number of hits to skip, for paging; pass the response's next_offset back with
+            the same query to fetch the next page.
+        all_hits: Return the COMPLETE result set in one call (for an explicit "ALL ..." request);
+            ignores limit, can't be combined with offset, and is refused above 10000 hits.
+        group_by, group_by_ranking: Collapse redundant polymer_entity hits into clusters, one
+            representative each (needs return_type="polymer_entity") — see the grouping note in
+            the server instructions.
         chemical: Set True for chemical-component attributes (paths from
             rcsb_list_pdb_search_attributes(schema="chemical"), e.g. "chem_comp.formula_weight").
             Switches to the text_chem service; usually pair with return_type="mol_definition".
-        facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
-            hits (see the faceting note in the server instructions for the spec).
-        sort_by: Attribute path to order the hits by (e.g.
-            "rcsb_entry_info.resolution_combined"). A pure attribute filter is a boolean match,
-            so hits otherwise come back in an essentially arbitrary (near-uniform score)
-            order — set this for "best resolution first", "newest first", and similar. Only
-            SORTABLE attributes work: those listing exact_match (strings) or equals
-            (numbers/dates) among their operators in rcsb_list_pdb_search_attributes;
-            full-text-only attributes (e.g. struct.title) are rejected. Not supported with
-            return_type="mol_definition" (e.g. chemical=True) — those results sort by score only.
+        facets: Optional aggregation specs to return a breakdown / distribution instead of hits
+            (see the faceting note in the server instructions for the spec).
+        sort_by: Attribute path to order the hits by. A pure attribute filter is a boolean match,
+            so hits otherwise come back in near-arbitrary order — set this for "best resolution
+            first", "newest first", etc. Only SORTABLE attributes work: those listing exact_match
+            (strings) or equals (numbers/dates) in rcsb_list_pdb_search_attributes; full-text-only
+            attributes (e.g. struct.title) and return_type="mol_definition" are rejected.
         sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
         {total_count, returned, offset, has_more, next_offset, hits:[{id, score}],
-        query_editor_url}. Hits are identifiers only — batch them into rcsb_get_entries
-        (or the rcsb_get_* tool matching return_type) for titles and other metadata.
-        The per-hit `score` is an ElasticSearch score (near-uniform for a pure attribute
-        filter, which is a boolean match) and carries NO biological meaning — don't use it
-        to rank hits by importance or quality.
-        With all_hits, the offset/has_more/next_offset paging fields are omitted. With `facets`,
-        instead returns {total_count, facets, query_editor_url}.
+        query_editor_url}; hits are ids only — batch them into rcsb_get_entries (or the
+        rcsb_get_* tool matching return_type). The per-hit `score` is near-uniform for a pure
+        attribute filter and carries NO biological meaning — don't rank hits by it.
+        all_hits/facets response variants: see the server instructions.
     """
     body = queries.build_combined_query(
         full_text=None,
@@ -1547,14 +1490,12 @@ async def rcsb_search_by_sequence(
         sequence_type: "protein", "dna", or "rna".
         identity_cutoff: Minimum sequence identity as a fraction 0-1 (e.g. 0.3 = 30%).
         evalue_cutoff: Maximum E-value to report.
-        return_type: What to return (default "polymer_entity"); one of entry, polymer_entity,
-            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
-            "Return types and fetching details" note in the server instructions).
+        return_type: What to return (default "polymer_entity"); see the "Return types and
+            fetching details" note in the server instructions.
         limit: Max hits (1-100). Returns polymer_entity IDs like "4HHB_1" — fetch their
             details with rcsb_get_polymer_entities.
-        offset: Number of hits to skip, for paging (default 0); pass the response's
-            next_offset back with the same query to fetch the next page.
-
+        offset: Number of hits to skip, for paging; pass the response's next_offset back with
+            the same query to fetch the next page.
         all_hits: Return the COMPLETE result set in one call (for an explicit "ALL ..." request);
             ignores limit, can't be combined with offset, and is refused above 10000 hits.
             Ignored when `facets` is set.
@@ -1564,25 +1505,16 @@ async def rcsb_search_by_sequence(
             rcsb_list_pdb_search_attributes for paths and operators.
         logical_operator: Combine this match and the attribute conditions with "and"
             (default) or "or".
-        facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
-            hits (see the faceting note in the server instructions for the spec).
-        group_by: Collapse redundant polymer_entity hits into clusters, returning one
-            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
-            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
-            Only available with return_type="polymer_entity".
-        group_by_ranking: Which member to keep as each cluster's representative (each ranking
-            has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
-            "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
-            relevant biological sequence — requires group_by="uniprot", and recommended
-            there).
-        sort_by: Attribute path to order the hits by (e.g.
-            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
-            for similarity searches this overrides the similarity-ranked order (each hit's
-            score is still returned). Omit to keep the default order. Only SORTABLE attributes
-            work: those listing exact_match (strings) or equals (numbers/dates) among their
-            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
-            struct.title) are rejected. Not supported with return_type="mol_definition"
-            (chemical-component results are ranked by score only).
+        facets: Optional aggregation specs to return a breakdown / distribution instead of hits
+            (see the faceting note in the server instructions for the spec).
+        group_by, group_by_ranking: Collapse redundant polymer_entity hits into clusters, one
+            representative each (needs return_type="polymer_entity") — see the grouping note in
+            the server instructions.
+        sort_by: Attribute path to order the hits by, replacing the default similarity ordering
+            (each hit's score is still returned); omit to keep it. Only SORTABLE attributes work:
+            those listing exact_match (strings) or equals (numbers/dates) in
+            rcsb_list_pdb_search_attributes; full-text-only attributes (e.g. struct.title) and
+            return_type="mol_definition" are rejected.
         sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
@@ -1647,13 +1579,11 @@ async def rcsb_search_by_chemical(
             fingerprint-similarity (similar molecules).
         match_subset: Formula queries only — match formulas that merely contain the
             requested atoms.
-        return_type: What to return (default "mol_definition" = the chemical component); one of entry,
-            polymer_entity, non_polymer_entity, polymer_instance, assembly, mol_definition (see the
-            "Return types and fetching details" note in the server instructions).
+        return_type: What to return (default "mol_definition" = the chemical component); see the
+            "Return types and fetching details" note in the server instructions.
         limit: Max hits (1-100).
-        offset: Number of hits to skip, for paging (default 0); pass the response's
-            next_offset back with the same query to fetch the next page.
-
+        offset: Number of hits to skip, for paging; pass the response's next_offset back with
+            the same query to fetch the next page.
         all_hits: Return the COMPLETE result set in one call (for an explicit "ALL ..." request);
             ignores limit, can't be combined with offset, and is refused above 10000 hits.
             Ignored when `facets` is set.
@@ -1663,25 +1593,16 @@ async def rcsb_search_by_chemical(
             rcsb_list_pdb_search_attributes for paths and operators.
         logical_operator: Combine this match and the attribute conditions with "and"
             (default) or "or".
-        facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
-            hits (see the faceting note in the server instructions for the spec).
-        group_by: Collapse redundant polymer_entity hits into clusters, returning one
-            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
-            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
-            Only available with return_type="polymer_entity".
-        group_by_ranking: Which member to keep as each cluster's representative (each ranking
-            has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
-            "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
-            relevant biological sequence — requires group_by="uniprot", and recommended
-            there).
-        sort_by: Attribute path to order the hits by (e.g.
-            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
-            for similarity searches this overrides the similarity-ranked order (each hit's
-            score is still returned). Omit to keep the default order. Only SORTABLE attributes
-            work: those listing exact_match (strings) or equals (numbers/dates) among their
-            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
-            struct.title) are rejected. Not supported with return_type="mol_definition"
-            (chemical-component results are ranked by score only).
+        facets: Optional aggregation specs to return a breakdown / distribution instead of hits
+            (see the faceting note in the server instructions for the spec).
+        group_by, group_by_ranking: Collapse redundant polymer_entity hits into clusters, one
+            representative each (needs return_type="polymer_entity") — see the grouping note in
+            the server instructions.
+        sort_by: Attribute path to order the hits by, replacing the default score ordering (each
+            hit's score is still returned); omit to keep it. Only SORTABLE attributes work: those
+            listing exact_match (strings) or equals (numbers/dates) in
+            rcsb_list_pdb_search_attributes; full-text-only attributes (e.g. struct.title) and
+            return_type="mol_definition" are rejected.
         sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
@@ -1740,13 +1661,11 @@ async def rcsb_search_by_structure(
         asym_id: Use this single chain as the reference instead (mutually exclusive
             with assembly_id).
         return_type: What to return (defaults to "assembly" for an assembly reference or
-            "polymer_instance" for a chain reference); one of entry, polymer_entity,
-            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
-            "Return types and fetching details" note in the server instructions).
+            "polymer_instance" for a chain reference); see the "Return types and fetching
+            details" note in the server instructions.
         limit: Max hits (1-100).
-        offset: Number of hits to skip, for paging (default 0); pass the response's
-            next_offset back with the same query to fetch the next page.
-
+        offset: Number of hits to skip, for paging; pass the response's next_offset back with
+            the same query to fetch the next page.
         all_hits: Return the COMPLETE result set in one call (for an explicit "ALL ..." request);
             ignores limit, can't be combined with offset, and is refused above 10000 hits.
             Ignored when `facets` is set.
@@ -1756,25 +1675,16 @@ async def rcsb_search_by_structure(
             rcsb_list_pdb_search_attributes for paths and operators.
         logical_operator: Combine this match and the attribute conditions with "and"
             (default) or "or".
-        facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
-            hits (see the faceting note in the server instructions for the spec).
-         group_by: Collapse redundant polymer_entity hits into clusters, returning one
-            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
-            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
-            Only available with return_type="polymer_entity".
-        group_by_ranking: Which member to keep as each cluster's representative (each ranking
-            has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
-            "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
-            relevant biological sequence — requires group_by="uniprot", and recommended
-            there).
-        sort_by: Attribute path to order the hits by (e.g.
-            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
-            for similarity searches this overrides the similarity-ranked order (each hit's
-            score is still returned). Omit to keep the default order. Only SORTABLE attributes
-            work: those listing exact_match (strings) or equals (numbers/dates) among their
-            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
-            struct.title) are rejected. Not supported with return_type="mol_definition"
-            (chemical-component results are ranked by score only).
+        facets: Optional aggregation specs to return a breakdown / distribution instead of hits
+            (see the faceting note in the server instructions for the spec).
+        group_by, group_by_ranking: Collapse redundant polymer_entity hits into clusters, one
+            representative each (needs return_type="polymer_entity") — see the grouping note in
+            the server instructions.
+        sort_by: Attribute path to order the hits by, replacing the default shape-similarity
+            ordering (each hit's score is still returned); omit to keep it. Only SORTABLE
+            attributes work: those listing exact_match (strings) or equals (numbers/dates) in
+            rcsb_list_pdb_search_attributes; full-text-only attributes (e.g. struct.title) and
+            return_type="mol_definition" are rejected.
         sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
@@ -1829,13 +1739,11 @@ async def rcsb_search_by_seqmotif(
             (prosite), "C..H[LIVF]" (regex), or "NXS" (simple wildcards).
         pattern_type: "prosite" (default), "regex", or "simple".
         sequence_type: "protein" (default), "dna", or "rna".
-        return_type: What to return (default "polymer_entity"); one of entry, polymer_entity,
-            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
-            "Return types and fetching details" note in the server instructions).
+        return_type: What to return (default "polymer_entity"); see the "Return types and
+            fetching details" note in the server instructions.
         limit: Max hits (1-100).
-        offset: Number of hits to skip, for paging (default 0); pass the response's
-            next_offset back with the same query to fetch the next page.
-
+        offset: Number of hits to skip, for paging; pass the response's next_offset back with
+            the same query to fetch the next page.
         all_hits: Return the COMPLETE result set in one call (for an explicit "ALL ..." request);
             ignores limit, can't be combined with offset, and is refused above 10000 hits.
             Ignored when `facets` is set.
@@ -1845,25 +1753,16 @@ async def rcsb_search_by_seqmotif(
             rcsb_list_pdb_search_attributes for paths and operators.
         logical_operator: Combine this match and the attribute conditions with "and"
             (default) or "or".
-        facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
-            hits (see the faceting note in the server instructions for the spec).
-        group_by: Collapse redundant polymer_entity hits into clusters, returning one
-            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
-            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
-            Only available with return_type="polymer_entity".
-        group_by_ranking: Which member to keep as each cluster's representative (each ranking
-            has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
-            "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
-            relevant biological sequence — requires group_by="uniprot", and recommended
-            there).
-        sort_by: Attribute path to order the hits by (e.g.
-            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
-            for similarity searches this overrides the similarity-ranked order (each hit's
-            score is still returned). Omit to keep the default order. Only SORTABLE attributes
-            work: those listing exact_match (strings) or equals (numbers/dates) among their
-            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
-            struct.title) are rejected. Not supported with return_type="mol_definition"
-            (chemical-component results are ranked by score only).
+        facets: Optional aggregation specs to return a breakdown / distribution instead of hits
+            (see the faceting note in the server instructions for the spec).
+        group_by, group_by_ranking: Collapse redundant polymer_entity hits into clusters, one
+            representative each (needs return_type="polymer_entity") — see the grouping note in
+            the server instructions.
+        sort_by: Attribute path to order the hits by, replacing the default score ordering (each
+            hit's score is still returned); omit to keep it. Only SORTABLE attributes work: those
+            listing exact_match (strings) or equals (numbers/dates) in
+            rcsb_list_pdb_search_attributes; full-text-only attributes (e.g. struct.title) and
+            return_type="mol_definition" are rejected.
         sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:
@@ -1980,13 +1879,11 @@ async def rcsb_search_strucmotif(
         rmsd_cutoff: Maximum RMSD of accepted hits (default 2.0).
         atom_pairing_scheme: ALL, BACKBONE, SIDE_CHAIN (default), or PSEUDO_ATOMS.
         motif_pruning_strategy: NONE or KRUSKAL (default).
-        return_type: What to return (default "assembly"); one of entry, polymer_entity,
-            non_polymer_entity, polymer_instance, assembly, mol_definition (see the
-            "Return types and fetching details" note in the server instructions).
+        return_type: What to return (default "assembly"); see the "Return types and fetching
+            details" note in the server instructions.
         limit: Max hits (1-100).
-        offset: Number of hits to skip, for paging (default 0); pass the response's
-            next_offset back with the same query to fetch the next page.
-
+        offset: Number of hits to skip, for paging; pass the response's next_offset back with
+            the same query to fetch the next page.
         all_hits: Return the COMPLETE result set in one call (for an explicit "ALL ..." request);
             ignores limit, can't be combined with offset, and is refused above 10000 hits.
             Ignored when `facets` is set.
@@ -1996,25 +1893,16 @@ async def rcsb_search_strucmotif(
             rcsb_list_pdb_search_attributes for paths and operators.
         logical_operator: Combine this match and the attribute conditions with "and"
             (default) or "or".
-        facets: Optional aggregation specs to return a breakdown / distribution of the matches instead of
-            hits (see the faceting note in the server instructions for the spec).
-        group_by: Collapse redundant polymer_entity hits into clusters, returning one
-            representative each — "seqid_30"/"seqid_50"/"seqid_70"/"seqid_90"/"seqid_95"
-            (cluster by that sequence-identity %) or "uniprot" (one per UniProt accession).
-            Only available with return_type="polymer_entity".
-        group_by_ranking: Which member to keep as each cluster's representative (each ranking
-            has a fixed direction): "resolution" (best resolution structure), "released_date" (most recent),
-            "entity_residue_count" (longest), "score" (best ElasticSearch score), or "coverage" (most
-            relevant biological sequence — requires group_by="uniprot", and recommended
-            there).
-        sort_by: Attribute path to order the hits by (e.g.
-            "rcsb_entry_info.resolution_combined"), replacing the default score ordering —
-            for similarity searches this overrides the similarity-ranked order (each hit's
-            score is still returned). Omit to keep the default order. Only SORTABLE attributes
-            work: those listing exact_match (strings) or equals (numbers/dates) among their
-            operators in rcsb_list_pdb_search_attributes; full-text-only attributes (e.g.
-            struct.title) are rejected. Not supported with return_type="mol_definition"
-            (chemical-component results are ranked by score only).
+        facets: Optional aggregation specs to return a breakdown / distribution instead of hits
+            (see the faceting note in the server instructions for the spec).
+        group_by, group_by_ranking: Collapse redundant polymer_entity hits into clusters, one
+            representative each (needs return_type="polymer_entity") — see the grouping note in
+            the server instructions.
+        sort_by: Attribute path to order the hits by, replacing the default score ordering (each
+            hit's score is still returned); omit to keep it. Only SORTABLE attributes work: those
+            listing exact_match (strings) or equals (numbers/dates) in
+            rcsb_list_pdb_search_attributes; full-text-only attributes (e.g. struct.title) and
+            return_type="mol_definition" are rejected.
         sort_direction: "asc" (default) or "desc"; applies only when sort_by is set.
 
     Returns:

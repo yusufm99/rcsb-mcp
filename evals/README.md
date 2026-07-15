@@ -1,5 +1,15 @@
 # Evaluation suite
 
+Two complementary suites:
+
+- **`rcsb_pdb_eval.xml`** (below) — end-to-end *accuracy*: can an agent fully answer
+  realistic PDB questions using these tools?
+- **[`tool_selection/`](tool_selection/)** — a lightweight *first-tool-call* A/B harness
+  for catching routing regressions when tool docstrings change (plus the deterministic
+  [`tests/test_tool_descriptions.py`](../tests/test_tool_descriptions.py) that guards
+  load-bearing phrases in CI). Reach for this after a docstring edit; reach for the
+  accuracy suite to judge overall server quality.
+
 [`rcsb_pdb_eval.xml`](rcsb_pdb_eval.xml) is a set of 14 read-only questions that
 measure how well an LLM — given **only** this MCP server's tools and no other
 context — can answer realistic Protein Data Bank questions. It follows the

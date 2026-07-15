@@ -1,0 +1,104 @@
+"""Deterministic guard for load-bearing tool-description content.
+
+The search-tool docstrings were deduplicated — shared config detail (return types,
+grouping, paging, faceting, ontology-resolver routing, assembly attributes) was moved
+into the FastMCP ``instructions=`` block, and each docstring left a pointer. These
+assertions lock in the cross-field rules and routing gotchas the JSON schema cannot
+encode, so a future trim can't silently delete one (or gut the block a pointer targets).
+
+No network, no API key, no model — this is the cheap CI gate. The behavioral A/B that
+checks whether the model still *acts* on this text lives in ``evals/tool_selection/``.
+"""
+import asyncio
+import re
+
+from rcsb_mcp import server
+
+
+def _norm(s: str) -> str:
+    """Collapse whitespace so line-wrapping in a docstring never hides a phrase."""
+    return re.sub(r"\s+", " ", s or "")
+
+
+def _descriptions():
+    tools = asyncio.run(server.mcp.list_tools())
+    return {t.name: _norm(t.description) for t in tools}
+
+
+# Gotchas that must stay in the SPECIFIC tool's own description: they are not derivable
+# from the schema and are not shared enough to live in the instructions block.
+REQUIRED_IN_TOOL = {
+    "rcsb_search_fulltext": [
+        "text-relevance, NOT biological importance",   # score is not quality
+        "SORTABLE attributes",                          # sort_by only works on some paths
+        "refused above 10000",                          # all_hits cap
+        "AND/OR/NOT are NOT boolean",                   # query-string gotcha
+    ],
+    "rcsb_search_by_attribute": [
+        "an empty result is a valid answer",            # don't fall back to keyword search
+        "carries NO biological meaning",                # score caveat (attribute form)
+        "EXCLUSIVE",                                     # range bound semantics
+        "NESTED boolean logic use rcsb_search_advanced",
+    ],
+    "rcsb_search_by_sequence": [
+        "4HHB_1",                                        # returned id shape
+        'return_type="mol_definition" are rejected',     # sort_by limitation
+    ],
+    "rcsb_search_by_chemical": [
+        "fingerprint-similarity",                        # match_type option
+        "sub-struct-graph",                              # substructure option
+        "merely contain the",                            # match_subset semantics
+    ],
+    "rcsb_search_by_structure": [
+        "mutually exclusive",                            # assembly_id vs asym_id
+        "Defaults to assembly",
+    ],
+    "rcsb_search_by_seqmotif": [
+        "prosite",
+        "simple wildcards",
+    ],
+    "rcsb_search_strucmotif": [
+        "mmCIF",                                         # label-vs-author id explanation
+        "author numbers give wrong/no hits",
+        "catalytic triads",                              # when-to-use routing
+        "PSEUDO_ATOMS",                                  # atom_pairing_scheme option
+    ],
+}
+
+# Shared guidance the docstrings now DELEGATE to via "see the server instructions" —
+# must survive in the always-on instructions block, or those pointers dangle.
+REQUIRED_IN_INSTRUCTIONS = [
+    "rcsb_find_disease_terms",                          # ontology resolver routing ...
+    "rcsb_find_go_terms",
+    "rcsb_find_interpro_domains",
+    "rcsb_find_enzyme_classes",
+    "rcsb_find_organisms",
+    "Return types",                                     # return-types + fetching note
+    "polymer_entity_instance_count_protein",            # assembly / multimer attr paths
+    "heteromeric",
+    "group_by",                                         # grouping note
+]
+
+
+def test_tool_gotchas_survive():
+    descs = _descriptions()
+    missing = []
+    for tool, phrases in REQUIRED_IN_TOOL.items():
+        assert tool in descs, f"tool {tool} is not registered"
+        for phrase in phrases:
+            if _norm(phrase) not in descs[tool]:
+                missing.append(f"{tool}: {phrase!r}")
+    assert not missing, (
+        "load-bearing text was removed from a tool description "
+        "(move it to the instructions block or keep it):\n  " + "\n  ".join(missing)
+    )
+
+
+def test_shared_guidance_survives_in_instructions():
+    instr = _norm(getattr(server.mcp, "instructions", ""))
+    assert instr, "server has no instructions block"
+    missing = [p for p in REQUIRED_IN_INSTRUCTIONS if _norm(p) not in instr]
+    assert not missing, (
+        "docstrings point to the server instructions for these, but they are missing "
+        "there:\n  " + "\n  ".join(missing)
+    )
