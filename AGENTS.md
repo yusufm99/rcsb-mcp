@@ -31,9 +31,10 @@ tests/
   one entry per GraphQL root field (root field, id arg, batch/single, default field
   selection). **Adding a Data API object is ideally a one-line registry entry.**
 - **Compact defaults + escape hatches.** Each `rcsb_get_*`/`rcsb_seqcoord_*` tool returns a
-  curated compact field selection but accepts a `fields=` override; `rcsb_list_data_fields`
-  (flat keyword search over an object's schema), `rcsb_describe_data_object`, and
-  `rcsb_describe_seqcoord_object` introspect the live schema for field discovery;
+  curated compact field selection but accepts a `fields=` override; `rcsb_describe_data_object`
+  (browse a level, drill in with `into=`, or keyword-search the schema with `query=` +
+  `max_depth=`) and `rcsb_describe_seqcoord_object` introspect the live schema for field
+  discovery;
   `rcsb_data_graphql` / `rcsb_seqcoord_graphql` are raw passthroughs. Don't try to make defaults
   exhaustive — and don't invent `fields=` paths; discover them against the live schema first.
 - **Server `instructions` = tool-usage guidance only** (routing, chaining, return

@@ -47,6 +47,9 @@ used. All 14 answers were verified against the live RCSB APIs on **2026-06-24**.
 > **Read [Known harness bugs](#known-harness-bugs) first.** As shipped, the harness does
 > not fail loudly — it reports a **confidently wrong score**. Unpatched, this suite scored
 > 8/14 while *every* tool call silently failed; with the two fixes applied it scores 14/14.
+> And even patched, the reported number is a **lower bound**: grading is exact string match, so
+> a correct answer phrased as a sentence scores ❌ (bug 3). Never read the raw score without
+> checking the per-task answers.
 
 The evaluation harness ships with the `mcp-builder` skill
 (`scripts/evaluation.py` + `connections.py` + `requirements.txt`). It launches
@@ -110,6 +113,28 @@ before returning the result.
 With both fixed, the suite runs clean: **14/14, zero serialization errors**. A useful tell that
 you are hitting bug 2 rather than a real failure: the per-task feedback in the report will say
 every tool call failed with an identical `TextContent` error.
+
+**3. The reported accuracy is a LOWER bound — grading is exact string match.** Not a crash, but
+it will mislead you the same way. `evaluation.py` scores with
+`int(response_value == qa_pair["answer"])`: no judge, no normalization, no substring match. The
+agent's answer must equal the ground truth *exactly*. A scientifically correct answer wrapped in
+a sentence scores ❌. Observed on 2026-07-16 (`claude-sonnet-5`), Task 1 — ground truth `P68871`:
+
+> *"The beta subunit corresponds to polymer entity 4HHB_2 ("Hemoglobin subunit beta"), which
+> maps to UniProt accession **P68871** (HBB_HUMAN)."* → graded ❌
+
+Reported 13/14; every one of the 14 answers actually contained its ground truth. The same
+question passed on an earlier run of the same server, so this is **run-to-run variance in how
+the agent phrases things**, not a behaviour change — the harness sets no temperature. Before
+concluding a question regressed, check whether the answer merely *contains* the expected value:
+
+```python
+# in the report, compare "Ground Truth Answer" vs "Actual Answer" per task
+expected in actual   # -> a formatting artifact, not a wrong answer
+```
+
+Consequences: don't read a 1-point drop as a regression without checking, and don't extend the
+suite with answers that invite prose (keep them short, ID-shaped, single-valued).
 
 Model ids are also stale: the harness default is `claude-3-7-sonnet-20250219`, and the `-m`
 example above predates current models — always pass a current model explicitly.

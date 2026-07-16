@@ -68,9 +68,9 @@ There is one tool per Data API GraphQL root field. Each takes a **list of IDs**
 (singular lookups = a one-element list) plus an optional `fields` argument to
 override the curated default selection with your own GraphQL sub-selection.
 Unknown IDs are reported under `not_found`. Discover the paths to put in `fields`
-with `rcsb_list_data_fields` (flat keyword search) or `rcsb_describe_data_object`
-(level-by-level) — every path they return is verified against the live schema, so
-don't guess field names.
+with `rcsb_describe_data_object` — browse a level, drill into a nested object with
+`into=`, or search the schema by keyword with `query=` + `max_depth=`. Every path it
+returns is verified against the live schema, so don't guess field names.
 
 | Tool | Object | Example ID                       |
 |------|--------|----------------------------------|
@@ -90,8 +90,7 @@ don't guess field names.
 | `rcsb_get_uniprot` | UniProt record (single) | `"P69905"`                       |
 | `rcsb_get_pubmed` | PubMed record (single, integer) | `6726807`                        |
 | `rcsb_get_group_provenance` | Grouping provenance (single) | `"provenance_sequence_identity"` |
-| `rcsb_list_data_fields` | Discover fields by keyword — a flat search over an object's live GraphQL schema (nested + cross-object paths), returning verified dotted paths to pass to `fields=`. The Data API analogue of `rcsb_list_pdb_search_attributes`. | —                                |
-| `rcsb_describe_data_object` | Introspect an object's live schema one level at a time (drill in with `into=`), for building a `fields=` selection. | —                                |
+| `rcsb_describe_data_object` | Introspect an object's live GraphQL schema to build a `fields=` selection: browse a level, drill into a nested object with `into=`, or search by keyword with `query=` + `max_depth=` (flat, incl. nested + cross-object paths). Returns verified dotted paths. The Data API analogue of `rcsb_list_pdb_search_attributes`. | —                                |
 | `rcsb_data_graphql` | Escape hatch: run any GraphQL query against the Data API. | —                                |
 
 The Search API only returns identifiers, so a search is the first step: batch the

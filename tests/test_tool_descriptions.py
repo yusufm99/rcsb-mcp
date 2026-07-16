@@ -86,11 +86,15 @@ REQUIRED_IN_TOOL = {
     # but these bits live ONLY here. `namespace`/`entry_type` are `str | None` (NOT Literals),
     # so their allowed values never reach the JSON schema — this docstring is their only home.
     "rcsb_find_go_terms": [
-        "molecular_function",                            # namespace values (not in the schema)
+        # namespace's values are no longer guarded here: it is now a GoNamespace Literal, so the
+        # schema ships the enum (incl. the mf/bp/cc aliases) and the prose is redundant.
         "are involved in",                               # trigger paraphrases (not in instructions)
+        "localized to",
     ],
     "rcsb_find_interpro_domains": [
-        "homologous_superfamily",                        # entry_type values (not in the schema)
+        # entry_type's values are no longer guarded here: it is now an InterProEntryType Literal,
+        # so the schema ships the enum (incl. the "superfamily" alias) and the prose is redundant.
+        "-containing proteins",                          # trigger paraphrase (not in instructions)
     ],
     "rcsb_find_enzyme_classes": [
         "break down / degrade",                          # fires when no enzyme is NAMED

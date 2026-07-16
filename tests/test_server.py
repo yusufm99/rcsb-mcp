@@ -1,7 +1,7 @@
 """Network-free tests for server-side logic that isn't a pure query builder.
 
 Covers _flatten_object_fields (the recursive GraphQL-schema flatten behind
-rcsb_list_data_fields) by injecting a synthetic, deliberately CYCLIC schema in place
+rcsb_describe_data_object's max_depth>1 search mode) by injecting a synthetic, deliberately CYCLIC schema in place
 of the live introspection calls — so depth-capping, cycle-guarding, keyword filtering,
 and the result cap are all exercised without touching the network.
 """
@@ -157,7 +157,7 @@ def test_enrich_relocation():
     out = _enrich("Field 'rcsb_pubmed_abstract_text' in type 'CoreEntry' is undefined")
     assert "not defined on type 'CoreEntry'" in out
     assert "pubmed.rcsb_pubmed_abstract_text" in out                 # correct path surfaced
-    assert 'rcsb_list_data_fields("entries", query="rcsb_pubmed_abstract_text")' in out
+    assert 'rcsb_describe_data_object("entries", query="rcsb_pubmed_abstract_text", max_depth=3)' in out
     print("ok: enrich relocation")
 
 
@@ -180,7 +180,7 @@ def test_enrich_unknown_field():
     out = _enrich("Field 'totally_made_up' in type 'CoreEntry' is undefined")
     assert "not defined on type 'CoreEntry'" in out
     assert "It exists in the schema at" not in out and "Did you mean" not in out
-    assert 'rcsb_list_data_fields("entries", query="totally_made_up")' in out
+    assert 'rcsb_describe_data_object("entries", query="totally_made_up", max_depth=3)' in out
     print("ok: enrich unknown field")
 
 
@@ -189,7 +189,7 @@ def test_enrich_seqcoord_steer():
     out = _enrich("Field 'foo' in type 'CoreEntry' is undefined",
                   root_field="alignments", url=server.SEQCOORD_GRAPHQL_URL)
     assert 'rcsb_describe_seqcoord_object("alignments"' in out
-    assert "rcsb_list_data_fields" not in out
+    assert "rcsb_describe_data_object" not in out
     print("ok: enrich seqcoord steer")
 
 
@@ -199,7 +199,7 @@ def test_enrich_syntax_error():
     out = _enrich(raw)
     assert raw in out                                   # keep the original diagnostic
     assert "`fields=`" in out and "separated by spaces or commas" in out
-    assert 'rcsb_list_data_fields("entries"' in out
+    assert 'rcsb_describe_data_object("entries"' in out
     print("ok: enrich syntax error")
 
 
