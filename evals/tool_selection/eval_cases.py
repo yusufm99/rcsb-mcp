@@ -33,10 +33,15 @@ CASES = [
          probes="ontology routing (list moved to instructions) -> resolver first",
          check=lambda t, a: t == "rcsb_find_disease_terms"),
 
+    # First-call probe for the group_by MECHANIC. The subject is pre-resolved (an InterPro id)
+    # so the model shouldn't need a resolver step first — the grouped search is the first action.
+    # (A realistic "human protein kinases" phrasing is multi-step — resolve concept, THEN group —
+    # which a first-call grader can't score; that belongs in the end-to-end rcsb_pdb_eval.xml.)
     dict(id="group-by-uniprot",
-         prompt="Give me one representative structure per UniProt accession for human protein "
-                "kinases, choosing the best-resolution one.",
-         probes="group_by requires return_type=polymer_entity (value list moved to instructions)",
+         prompt="Using the InterPro id IPR000719 (protein-kinase domain) directly — no concept "
+                "lookup needed — search PDB polymer entities carrying that domain and return ONE "
+                "representative per UniProt accession, keeping the best-resolution structure.",
+         probes="group_by=uniprot mechanic: must also set return_type=polymer_entity",
          check=lambda t, a: a.get("group_by") is not None
                             and a.get("return_type") == "polymer_entity"),
 
@@ -62,9 +67,17 @@ CASES = [
          probes="whole-shape structure service",
          check=lambda t, a: t == "rcsb_search_by_structure" and str(a.get("entry_id", "")).upper() == "4HHB"),
 
-    dict(id="strucmotif", prompt="Find structures containing a catalytic-triad geometry like the one in 4CHA.",
-         probes="strucmotif vs by_structure/by_seqmotif (routing survived)",
-         check=lambda t, a: t == "rcsb_search_strucmotif"),
+    # First-call routing probe for strucmotif. Residues are given as mmCIF label ids, but the
+    # strucmotif docstring itself tells the model to resolve label ids via
+    # rcsb_get_polymer_entity_instances first — so BOTH a direct strucmotif call AND that
+    # sanctioned prerequisite count as correct routing into the strucmotif workflow; only a
+    # mis-route to by_structure (whole shape) / by_seqmotif (sequence) / a text search fails.
+    dict(id="strucmotif",
+         prompt="Find OTHER structures whose 3D residue geometry matches the catalytic triad of "
+                "4CHA — the same spatial arrangement of chain A residues at mmCIF label positions "
+                "57, 102, 195.",
+         probes="routes to the strucmotif workflow (direct call or label-id resolution first)",
+         check=lambda t, a: t in ("rcsb_search_strucmotif", "rcsb_get_polymer_entity_instances")),
 
     dict(id="all-hits", prompt="Give me ALL human structures released in 2024 — the complete list.",
          probes="all_hits vs paging on an explicit ALL request",

@@ -88,10 +88,14 @@ def build_messages(case):
 
 def run(args):
     instr, tools = load_server(args.src)
+    only = set(x for x in (args.only or "").split(",") if x)
     results = {}
     for case in CASES:
+        if only and case["id"] not in only:
+            continue
         passes = 0
         errs = []
+        observed = []
         for _ in range(args.k):
             msgs = build_messages(case)
             try:
@@ -107,11 +111,13 @@ def run(args):
             except Exception:  # noqa: BLE001
                 ok = False
             passes += ok
+            observed.append({"tool": name, "args": cargs, "pass": ok})
         rate = passes / max(1, args.k)
-        results[case["id"]] = {"rate": rate, "probes": case["probes"], "errors": errs}
+        results[case["id"]] = {"rate": rate, "probes": case["probes"], "errors": errs,
+                               "calls": observed}
         flag = "" if rate == 1 else ("  <-- FAIL" if rate == 0 else "  <-- flaky")
         print(f"  {case['id']:16} {int(rate*100):3d}% ({passes}/{args.k}){flag}   {case['probes']}")
-    overall = sum(v["rate"] for v in results.values()) / len(results)
+    overall = sum(v["rate"] for v in results.values()) / max(1, len(results))
     print(f"\n  OVERALL mean pass-rate: {overall:.2f}   (src={args.src}, model={args.model}, k={args.k})")
     if args.out:
         json.dump({"src": args.src, "model": args.model, "k": args.k, "results": results},
@@ -128,5 +134,6 @@ if __name__ == "__main__":
     p.add_argument("--src", default="src", help="server src dir to load tools from (point at old checkout for A/B)")
     p.add_argument("--k", type=int, default=5, help="samples per case (compare RATES, not single runs)")
     p.add_argument("--temperature", type=float, default=0.0)
+    p.add_argument("--only", default="", help="comma-separated case ids to run (default: all)")
     p.add_argument("--out", default="")
     run(p.parse_args())
