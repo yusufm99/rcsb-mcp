@@ -44,6 +44,10 @@ used. All 14 answers were verified against the live RCSB APIs on **2026-06-24**.
 
 ## Running it
 
+> **Read [Known harness bugs](#known-harness-bugs) first.** As shipped, the harness does
+> not fail loudly — it reports a **confidently wrong score**. Unpatched, this suite scored
+> 8/14 while *every* tool call silently failed; with the two fixes applied it scores 14/14.
+
 The evaluation harness ships with the `mcp-builder` skill
 (`scripts/evaluation.py` + `connections.py` + `requirements.txt`). It launches
 Claude with this server's tools attached, lets it answer each question, and
@@ -77,6 +81,38 @@ python evaluation.py \
 The report's accuracy and the agent's tool feedback are the signal: a question
 that fails usually points at a tool description or schema that needs sharpening,
 not just a wrong answer.
+
+## Known harness bugs
+
+Two defects in the `mcp-builder` harness (as of 2026-07-16, run with `claude-sonnet-5`)
+make the command above report a **confidently wrong** result instead of failing loudly.
+Neither is in this server. Patch your local copy before trusting a score — both fixes are
+small — and ideally push them upstream to the skill rather than forking it here.
+
+**1. Only the first tool call in a turn is answered** (`evaluation.py`, `agent_loop`).
+It does `tool_use = next(block for block in response.content if block.type == "tool_use")`
+and appends a single `tool_result`. Current models readily emit **parallel** tool calls, so
+the remaining `tool_use` ids never get a result and the next request dies with
+`400 ... tool_use ids were found without tool_result blocks`. *Fix:* iterate over **every**
+`tool_use` block, execute each, and return all `tool_result`s in one user message.
+
+**2. Tool results never reach the model** (`evaluation.py` + `connections.py`) — *this is the
+dangerous one.* `call_tool` returns `result.content`, a **list of MCP `TextContent` objects**;
+the harness then does
+`json.dumps(tool_result) if isinstance(tool_result, (dict, list)) else str(tool_result)`.
+The list branch raises `TypeError: Object of type TextContent is not JSON serializable`, which
+the surrounding `except` swallows and feeds back to the model **as the tool's output**. Every
+tool call appears to fail, the agent falls back on its own prior knowledge, and the suite still
+prints a score. Unpatched it reported **8/14 while calling zero tools successfully** — the
+answers were recited from memory, not retrieved. *Fix:* unwrap each content block's `.text`
+before returning the result.
+
+With both fixed, the suite runs clean: **14/14, zero serialization errors**. A useful tell that
+you are hitting bug 2 rather than a real failure: the per-task feedback in the report will say
+every tool call failed with an identical `TextContent` error.
+
+Model ids are also stale: the harness default is `claude-3-7-sonnet-20250219`, and the `-m`
+example above predates current models — always pass a current model explicitly.
 
 ## Maintaining the suite
 
