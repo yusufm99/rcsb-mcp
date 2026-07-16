@@ -63,6 +63,25 @@ REQUIRED_IN_TOOL = {
         "catalytic triads",                              # when-to-use routing
         "PSEUDO_ATOMS",                                  # atom_pairing_scheme option
     ],
+    # rcsb_get_* family: the `fields`-param mechanics were shortened to a pointer, but each
+    # tool's cross-reference / drill-down guidance must survive the trim.
+    "rcsb_get_entries": [
+        "rcsb_entry_container_identifiers",              # component-id drill-down
+        "compose them with the entry id",                # how to build sibling-tool ids
+    ],
+    "rcsb_get_nonpolymer_entities": [
+        "rcsb_get_chem_comps",                           # where to get the ligand chemistry
+    ],
+    "rcsb_get_polymer_entities": [
+        "rcsb_search_by_sequence",                       # id source hint
+    ],
+    "rcsb_get_uniprot": [
+        "rcsb_uniprot_annotation",                       # heavier optional annotation sets ...
+        "rcsb_uniprot_feature",
+    ],
+    "rcsb_get_chem_comps": [
+        "InChIKey",                                      # a default field callers rely on
+    ],
 }
 
 # Shared guidance the docstrings now DELEGATE to via "see the server instructions" —
