@@ -2397,17 +2397,6 @@ async def rcsb_seqcoord_alignments(
     The returned target_alignments[].target_id values are the mapped identifiers in
     the to_ref system, each with its aligned regions.
 
-    Reference systems (from_ref/to_ref):
-        UNIPROT       — a UniProt accession, e.g. "P69905"
-        NCBI_PROTEIN  — an NCBI RefSeq protein, e.g. "NP_000508"
-        NCBI_GENOME   — an NCBI RefSeq genome, e.g. "NC_000016"
-        PDB_ENTITY    — a PDB polymer entity, e.g. "4HHB_1" (entry_entityNumber)
-        PDB_INSTANCE  — a PDB polymer chain, e.g. "4HHB.A" (entry.asym_id)
-
-    Note: PDB query ids must be ENTITY-level ("4HHB_1"), not a bare entry ("4HHB").
-    To answer a question about a whole entry, first get its polymer entity ids
-    (e.g. via the Data API: 4HHB -> 4HHB_1, 4HHB_2) and query each one.
-
     Examples:
         - "What NCBI proteins map to PDB entity 4HHB_1?"
           query_id="4HHB_1", from_ref="PDB_ENTITY", to_ref="NCBI_PROTEIN"
@@ -2415,7 +2404,11 @@ async def rcsb_seqcoord_alignments(
           query_id="P69905", from_ref="UNIPROT", to_ref="PDB_ENTITY"
 
     Args:
-        query_id: The sequence id in the from_ref system (see above).
+        query_id: The sequence id, in the from_ref system's format — UNIPROT "P69905",
+            NCBI_PROTEIN "NP_000508", NCBI_GENOME "NC_000016", PDB_ENTITY "4HHB_1"
+            (entry_entityNumber), PDB_INSTANCE "4HHB.A" (entry.asym_id). PDB ids must be
+            ENTITY-level, never a bare entry: for a whole entry, first get its polymer
+            entity ids (4HHB -> 4HHB_1, 4HHB_2) and query each one.
         from_ref: Reference system of query_id.
         to_ref: Reference system to map onto.
         seq_range: Optional [begin, end] (1-based) to restrict the query region.
@@ -2452,15 +2445,10 @@ async def rcsb_seqcoord_annotations(
 ) -> dict[str, Any]:
     """Fetch positional sequence annotations (features) for one sequence.
 
-    reference (the system query_id is given in): NCBI_GENOME, NCBI_PROTEIN,
-    PDB_ENTITY, PDB_INSTANCE, UNIPROT.
-    sources (annotation provenance, one or more): PDB_ENTITY, PDB_INSTANCE,
-    PDB_INTERFACE, UNIPROT.
-
     Args:
         query_id: The sequence id, e.g. "4HHB_1" (PDB_ENTITY) or "P69905" (UNIPROT).
-        reference: Reference system of query_id.
-        sources: Annotation source(s) to pull features from.
+        reference: Reference system query_id is given in.
+        sources: Annotation provenance — which source(s) to pull features from.
         seq_range: Optional [begin, end] (1-based) to restrict the region.
         filters: Optional list of {field, operation, source?, values} filter dicts,
             where field is TARGET_ID or TYPE and operation is CONTAINS or EQUALS.
@@ -2485,8 +2473,6 @@ async def rcsb_seqcoord_group_alignments(
     fields: str | None = None,
 ) -> dict[str, Any]:
     """Fetch alignments among the members of a sequence group.
-
-    group: MATCHING_UNIPROT_ACCESSION or SEQUENCE_IDENTITY.
 
     Args:
         group: How the group is defined.
@@ -2514,13 +2500,10 @@ async def rcsb_seqcoord_group_annotations(
 ) -> dict[str, Any]:
     """Fetch annotations across the members of a sequence group.
 
-    group: MATCHING_UNIPROT_ACCESSION or SEQUENCE_IDENTITY.
-    sources (one or more): PDB_ENTITY, PDB_INSTANCE, PDB_INTERFACE, UNIPROT.
-
     Args:
         group: How the group is defined.
         group_id: The group id, e.g. "P69905" for MATCHING_UNIPROT_ACCESSION.
-        sources: Annotation source(s) to pull features from.
+        sources: Annotation provenance — which source(s) to pull features from.
         summary: If true, return a positional summary aggregated across the group
             (group_annotations_summary) instead of per-member annotations.
         filters: Optional filter dicts (see rcsb_seqcoord_annotations).

@@ -105,6 +105,15 @@ REQUIRED_IN_TOOL = {
     "rcsb_find_organisms": [
         "disambiguates a species from its strains",      # not in instructions ('strain' absent)
     ],
+    # rcsb_seqcoord_*: the ref/group/source VALUES are Literals (SequenceRef/GroupRef/
+    # AnnotationRef), so the schema ships them and the prose was cut. These are what the schema
+    # cannot express — the per-system id FORMATS and the entity-level rule.
+    "rcsb_seqcoord_alignments": [
+        "entry_entityNumber",                            # PDB_ENTITY id format
+        "entry.asym_id",                                 # PDB_INSTANCE id format
+        "ENTITY-level",                                  # a bare entry id silently fails
+        "only cross-references UniProt",                 # why not the Data API (routing)
+    ],
 }
 
 # Shared guidance the docstrings now DELEGATE to via "see the server instructions" —
