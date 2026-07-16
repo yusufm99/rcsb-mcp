@@ -296,7 +296,9 @@ Other capabilities:
   or cellular COMPONENT / location ("mitochondrial membrane"), first call rcsb_find_go_terms to resolve
   the phrase to a Gene Ontology id, then search with
   rcsb_polymer_entity_annotation.annotation_lineage.id exact_match "GO:..." (matches the term and
-  all its descendants). This is far more precise than keyword search. Prefer terms with a higher
+  all its descendants); for ONLY that exact term (no descendants) use
+  rcsb_polymer_entity_annotation.annotation_id exact_match "GO:..." instead (add .type="GO" to be
+  explicit). This is far more precise than keyword search. Prefer terms with a higher
   pdb_entry_count; use the "in" operator with several GO ids to broaden.
 - For requests referencing a protein DOMAIN, FAMILY, or fold ("SH2 domain", "immunoglobulin fold",
   "kinase domain"), first call rcsb_find_interpro_domains to resolve it to an InterPro id, then search
@@ -1044,29 +1046,18 @@ async def rcsb_find_go_terms(
     mitochondrial membrane, nucleus) to Gene Ontology (GO) terms, so you can run precise
     GO-based PDB searches instead of keyword guessing.
 
-    Use this whenever a request involves what a protein DOES or where it acts — including
-    "proteins that <do X> / are involved in / participate in / are responsible for ...",
-    or "localized to / located in ...". Covers a molecular FUNCTION ("kinase activity",
-    "ATP binding"), a biological PROCESS ("DNA repair", "apoptosis", "cell signaling"), or a
-    cellular COMPONENT / location ("mitochondrial membrane", "nucleus"). Resolve the phrase to
-    a GO id here, then search by it.
-
-    To search by a resolved GO id (attributes are rcsb_polymer_entity_annotation.*;
-    return_type is usually "entry" or "polymer_entity"):
-    - PREFER `rcsb_polymer_entity_annotation.annotation_lineage.id` exact_match "GO:..." —
-      matches the term AND all of its more-specific descendants (e.g. "kinase activity"
-      also catches "protein serine/threonine kinase activity"). Best for functional queries.
-    - Use `rcsb_polymer_entity_annotation.annotation_id` exact_match "GO:..." for ONLY that
-      exact term. Optionally add a `.type` = "GO" filter to be explicit.
+    Use this when a request involves what a protein DOES or where it acts — "proteins that
+    <do X> / are involved in / participate in / are responsible for ...", "localized to /
+    located in ...". Resolve the phrase to a GO id here, then search by it — see the resolver
+    guidance in the server instructions for the attribute path and lineage semantics.
 
     Args:
         query: Free-text function / process / location, e.g. "kinase activity", "DNA repair".
         namespace: Optional GO aspect to restrict to — "molecular_function" (aka "function"),
             "biological_process" ("process"), or "cellular_component" ("location"/"component").
-        limit: Max GO terms to return (1-25).
+        limit: Max GO terms to return.
         with_pdb_counts: If true (default), annotate each term with pdb_entry_count (PDB
-            entries carrying it, via annotation_lineage.id) so you can prefer well-represented
-            terms and avoid empty searches.
+            entries carrying it, via annotation_lineage.id).
 
     Returns:
         {query, namespace, count, terms:[{id, name, aspect, pdb_entry_count?}]}.
@@ -1118,23 +1109,20 @@ async def rcsb_find_interpro_domains(
     fold, zinc finger, beta-barrel, WD40 repeat, kinase domain) to InterPro entries, for
     precise InterPro-based PDB searches instead of keyword guessing.
 
-    Use this when a request references a protein DOMAIN, FAMILY, or fold — including
-    "structures containing / with a <domain>", "<domain>-containing proteins", or
-    "members of the <family> family" (e.g. "SH2 domain", "immunoglobulin fold", "protein
-    kinase domain", "Rossmann fold", "zinc finger"). Resolve the phrase to an InterPro
-    accession (IPRxxxxxx) here, then search by it:
-    `rcsb_polymer_entity_annotation.annotation_id` exact_match "IPRxxxxxx" (add a
-    `.type` = "InterPro" filter to be explicit; use the `in` operator with several IPR ids to
-    broaden). Unlike GO, use annotation_id — InterPro's hierarchy is not expanded by lineage.
+    Use this whenever a request references a protein DOMAIN, FAMILY, or fold — "structures
+    containing / with a <domain>", "<domain>-containing proteins", "members of the <family>
+    family". Resolve the phrase to an InterPro accession (IPRxxxxxx) here, then search by it —
+    see the resolver guidance in the server instructions for the attribute path and lineage
+    semantics.
 
     Args:
         query: Free-text domain/family name, e.g. "SH2 domain", "immunoglobulin".
         entry_type: Optional InterPro type filter — one of domain, family,
             homologous_superfamily (aka superfamily), repeat, conserved_site, binding_site,
             active_site, ptm. Omit to return all types.
-        limit: Max entries to return (1-25).
+        limit: Max entries to return.
         with_pdb_counts: If true (default), annotate each entry with pdb_entry_count (PDB
-            entries carrying it) so you can prefer well-represented entries and avoid empty searches.
+            entries carrying it).
 
     Returns:
         {query, entry_type, count, entries:[{id, name, type, pdb_entry_count?}]}.
@@ -1180,20 +1168,15 @@ async def rcsb_find_enzyme_classes(
     Commission (EC) numbers, for precise EC-based PDB searches instead of keyword guessing.
 
     Use this when a request references an enzyme, enzyme class, or reaction — including
-    "enzymes that catalyze / break down / degrade / synthesize / hydrolyze / phosphorylate ..."
-    (e.g. "alcohol dehydrogenase", "protein tyrosine kinase", "DNA polymerase", "serine
-    protease", "EC 3.4.21"). Resolve the phrase to an EC number here, then
-    search by it:
-    `rcsb_polymer_entity.rcsb_ec_lineage.id` exact_match "<EC>" — EC is hierarchical and this
-    matches the number AND its descendants, so a full EC ("1.1.1.1") finds that exact enzyme while
-    a partial EC ("3.4.21") finds the whole sub-subclass. Use the `in` operator with several EC
-    numbers to broaden.
+    "enzymes that catalyze / break down / degrade / synthesize / hydrolyze / phosphorylate ...".
+    Resolve the phrase to an EC number here, then search by it — see the resolver guidance in
+    the server instructions for the attribute path and lineage semantics.
 
     Args:
         query: Free-text enzyme / reaction, e.g. "alcohol dehydrogenase", "protein kinase".
-        limit: Max EC numbers to return (1-25).
-        with_pdb_counts: If true (default), annotate each with pdb_entry_count (PDB entries carrying
-            it, via rcsb_ec_lineage.id) so you can prefer well-represented enzyme classes.
+        limit: Max EC numbers to return.
+        with_pdb_counts: If true (default), annotate each with pdb_entry_count (PDB entries
+            carrying it, via rcsb_ec_lineage.id).
 
     Returns:
         {query, count, enzymes:[{ec, name, pdb_entry_count?}]}.
@@ -1238,23 +1221,16 @@ async def rcsb_find_disease_terms(
     Alzheimer disease, cystic fibrosis) to MONDO ontology ids, for precise disease-based PDB
     searches instead of keyword guessing.
 
-    Use this for ANY request that mentions a disease/disorder/syndrome/condition — including
-    "structures involved in / associated with / linked to <disease>", or "proteins implicated
-    in <disease>". Examples: "diabetes", "type 2 diabetes", "cancer", "breast cancer",
-    "Alzheimer disease", "Parkinson disease", "cystic fibrosis", "asthma". Resolve the phrase
-    to a MONDO id here, then search by it:
-    `rcsb_uniprot_annotation.annotation_lineage.id` exact_match "MONDO:..." — disease
-    annotations are UniProt-derived, and lineage matches the term AND its subtypes (e.g.
-    "cancer" catches specific cancers). Use the `in` operator with several MONDO ids to broaden.
-
-    Note this attribute is rcsb_uniprot_annotation.* (UniProt-based), unlike the GO/InterPro
-    resolvers which use rcsb_polymer_entity_annotation.*.
+    Use for ANY request mentioning a disease/disorder/syndrome/condition — "structures involved
+    in / associated with / linked to <disease>", "proteins implicated in <disease>". Resolve the
+    phrase to a MONDO id here, then search by it — see the resolver guidance in the server
+    instructions for the attribute path and lineage semantics.
 
     Args:
         query: Free-text disease / condition, e.g. "cystic fibrosis", "breast cancer".
-        limit: Max MONDO terms to return (1-25).
+        limit: Max MONDO terms to return.
         with_pdb_counts: If true (default), annotate each with pdb_entry_count (PDB entries
-            carrying it, via annotation_lineage.id) so you can prefer well-represented diseases.
+            carrying it, via annotation_lineage.id).
 
     Returns:
         {query, count, diseases:[{id, name, pdb_entry_count?}]}.
@@ -1301,28 +1277,18 @@ async def rcsb_find_organisms(
     Escherichia coli, mammals, bacteria, primates) to NCBI Taxonomy ids, for precise
     taxonomy-based PDB searches instead of keyword guessing.
 
-    Use this whenever a request restricts structures by SOURCE ORGANISM or any higher taxon —
-    "structures from <organism>", "<clade> proteins", a common name you want as a canonical
-    taxon ("human", "fruit fly"), or "members of the <family/order/class> ...". Resolve the
-    phrase to an NCBI taxon id here, then search by it:
-    `rcsb_entity_source_organism.taxonomy_lineage.id` exact_match "<taxId>" — each entity's
-    taxonomy_lineage is its full NCBI ancestor chain, so this matches the taxon AND every
-    organism beneath it (a species id like "9606" finds Homo sapiens; a clade id like "40674"
-    finds all of Mammalia). Pass the id as a STRING: the attribute is string-typed, so
-    value="9606" works while value=9606 is rejected. Use the `in` operator with several ids to
-    broaden. (`rcsb_entity_source_organism.taxonomy_lineage.name` is the string-name equivalent;
-    prefer the id.)
-
-    For a known exact binomial (e.g. "Homo sapiens"), a direct
-    `rcsb_entity_source_organism.ncbi_scientific_name` exact_match search also works — this tool
-    is most valuable for common names and for CLADES, which a plain name search cannot expand.
+    Use when a request restricts structures by SOURCE ORGANISM or any higher taxon — a common
+    name you want as a canonical taxon ("human", "fruit fly"), or a CLADE, which a plain name
+    search cannot expand. Resolve the phrase to a taxon id here, then search by it — see the
+    resolver guidance in the server instructions for the attribute path, lineage semantics and
+    the id-typing gotcha.
 
     Args:
         query: Free-text organism / clade / common name, e.g. "human", "mammals", "E. coli".
-        limit: Max taxa to return (1-25).
+        limit: Max taxa to return.
         with_pdb_counts: If true (default), annotate each taxon with pdb_entry_count (PDB
-            entries from it or any organism beneath it, via taxonomy_lineage.id) so you can
-            prefer well-represented taxa — this also disambiguates a species from its strains.
+            entries from it or any organism beneath it, via taxonomy_lineage.id) — this also
+            disambiguates a species from its strains.
 
     Returns:
         {query, count, taxa:[{tax_id, scientific_name, common_name, rank, pdb_entry_count?}]}.

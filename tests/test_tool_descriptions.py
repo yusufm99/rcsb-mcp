@@ -82,6 +82,25 @@ REQUIRED_IN_TOOL = {
     "rcsb_get_chem_comps": [
         "InChIKey",                                      # a default field callers rely on
     ],
+    # rcsb_find_* resolvers: the search-by-id recipe was delegated to the instructions block,
+    # but these bits live ONLY here. `namespace`/`entry_type` are `str | None` (NOT Literals),
+    # so their allowed values never reach the JSON schema — this docstring is their only home.
+    "rcsb_find_go_terms": [
+        "molecular_function",                            # namespace values (not in the schema)
+        "are involved in",                               # trigger paraphrases (not in instructions)
+    ],
+    "rcsb_find_interpro_domains": [
+        "homologous_superfamily",                        # entry_type values (not in the schema)
+    ],
+    "rcsb_find_enzyme_classes": [
+        "break down / degrade",                          # fires when no enzyme is NAMED
+    ],
+    "rcsb_find_disease_terms": [
+        "implicated in",                                 # trigger paraphrase
+    ],
+    "rcsb_find_organisms": [
+        "disambiguates a species from its strains",      # not in instructions ('strain' absent)
+    ],
 }
 
 # Shared guidance the docstrings now DELEGATE to via "see the server instructions" —
@@ -92,6 +111,16 @@ REQUIRED_IN_INSTRUCTIONS = [
     "rcsb_find_interpro_domains",
     "rcsb_find_enzyme_classes",
     "rcsb_find_organisms",
+    # The rcsb_find_* docstrings now DELEGATE the search-by-resolved-id recipe here, so the
+    # instructions block is the SOLE home of these attribute paths. Trim them and the resolvers
+    # silently lose the only documented way to use their output.
+    "rcsb_polymer_entity_annotation.annotation_lineage.id",   # GO (term + descendants)
+    'annotation_id exact_match "GO:..."',                     # GO exact-term-only path
+    "rcsb_polymer_entity_annotation.annotation_id",           # InterPro (NOT lineage)
+    "rcsb_polymer_entity.rcsb_ec_lineage.id",                 # EC (hierarchical)
+    "rcsb_uniprot_annotation.annotation_lineage.id",          # MONDO (UniProt-derived)
+    "rcsb_entity_source_organism.taxonomy_lineage.id",        # NCBI taxonomy
+    'pass the id as a STRING ("9606", not 9606)',             # taxon id-typing gotcha
     "Return types",                                     # return-types + fetching note
     "polymer_entity_instance_count_protein",            # assembly / multimer attr paths
     "heteromeric",
