@@ -42,6 +42,12 @@ For a structure-search query, present the results as a table inside a fully rend
   * **Title**
   * **Experimental Method**
   * **Resolution (Å)** (display "NA" if unavailable)
+  * **Why matched** — a short justification of why this structure is a valid result for the
+    query: the concrete attribute value, matched keyword, annotation (UniProt/InterPro/Pfam/GO/
+    EC), sequence/chemistry/motif hit, or title/abstract evidence that ties it to the user's
+    request. Cite the tool-returned value the match rests on; wrap any interpretive part per
+    **Source Provenance** below. Use this column to show that likely false positives were
+    checked and confirmed (or to flag borderline matches as tentative).
   * **Additional Information** (query-specific details)
 * The page should include a **Data usage summary** section explaining how the information returned by each API call was used to choose, rank, filter, and enrich the final collection of structures (see **Data Usage Summary** below).
 * As the **last element** of the page, include a link to the RCSB.org Advanced Search that opens the final collection of structures (see **Explore the Final Collection in RCSB.org** below).
